@@ -473,6 +473,7 @@ export default function App() {
       const saved = await updateDesktopSettings(desktopSettings);
       setDesktopSettings(saved);
       setSettingsDirty(false);
+      setProviderStatus(await getOpenAIProviderStatus());
       if (activeWorkspaceId) await refreshWorkspaceData();
       setNotice("设置已保存到本地数据库。");
     } catch (error) {
