@@ -35,6 +35,8 @@ export type IndexedFile = {
   sha256: string | null;
   status: string;
   modified_at: string | null;
+  current_version_id: string | null;
+  parser_version: string | null;
   queue_status: string | null;
 };
 
@@ -65,6 +67,36 @@ export type IndexQueueSummary = {
   failed: number;
   cancelled: number;
   total: number;
+};
+
+export type ParserStatus = {
+  running: boolean;
+  processed: number;
+  failed: number;
+  last_file_id: string | null;
+  last_completed_at: string | null;
+  last_error: string | null;
+  parser_version: string;
+};
+
+export type ParsedPreview = {
+  file_id: string;
+  filename: string;
+  sha256: string;
+  parser: string;
+  parser_version: string;
+  file_type: string;
+  title: string | null;
+  metadata: Record<string, unknown>;
+  text: string;
+  text_truncated: boolean;
+  units: Array<{
+    kind: string;
+    text: string;
+    locator: Record<string, unknown>;
+    metadata: Record<string, unknown>;
+  }>;
+  units_truncated: boolean;
 };
 
 export type Conversation = {
@@ -198,6 +230,18 @@ export function listFiles(workspaceId: string): Promise<IndexedFile[]> {
 
 export function getIndexQueueSummary(workspaceId: string): Promise<IndexQueueSummary> {
   return request<IndexQueueSummary>(`/index-jobs/summary?workspace_id=${encodeURIComponent(workspaceId)}`);
+}
+
+export function getParserStatus(): Promise<ParserStatus> {
+  return request<ParserStatus>("/parser/status");
+}
+
+export function processParserQueue(limit = 20): Promise<{ processed: number; status: ParserStatus }> {
+  return request(`/parser/process?limit=${encodeURIComponent(String(limit))}`, { method: "POST" });
+}
+
+export function getParsedPreview(fileId: string): Promise<ParsedPreview> {
+  return request<ParsedPreview>(`/files/${fileId}/parsed`);
 }
 
 export function listConversations(workspaceId?: string): Promise<Conversation[]> {
