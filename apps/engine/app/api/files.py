@@ -59,7 +59,7 @@ def parsed_file_preview(
         if file is None:
             raise HTTPException(status_code=404, detail="File not found")
         version = session.get(FileVersion, file.current_version_id) if file.current_version_id else None
-        if file.status != "parsed" or version is None:
+        if file.status not in {"parsed", "indexed"} or version is None:
             raise HTTPException(status_code=409, detail="File has not completed Phase 3 parsing")
         payload = request.app.state.parser_worker.cache.read(version.sha256)
         if payload is None:
