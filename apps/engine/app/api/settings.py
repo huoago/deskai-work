@@ -14,6 +14,8 @@ DEFAULTS = {
     "default_model": "gpt-5.6-sol",
     "reasoning_level": "medium",
     "auto_index": True,
+    "memory_auto_learn": True,
+    "memory_min_confidence": 0.78,
 }
 
 
@@ -22,6 +24,8 @@ class DesktopSettings(BaseModel):
     default_model: str = Field(default="gpt-5.6-sol", min_length=1, max_length=255)
     reasoning_level: Literal["low", "medium", "high"] = "medium"
     auto_index: bool = True
+    memory_auto_learn: bool = True
+    memory_min_confidence: float = Field(default=0.78, ge=0.5, le=1.0)
 
 
 class DesktopSettingsUpdate(BaseModel):
@@ -29,6 +33,8 @@ class DesktopSettingsUpdate(BaseModel):
     default_model: str | None = Field(default=None, min_length=1, max_length=255)
     reasoning_level: Literal["low", "medium", "high"] | None = None
     auto_index: bool | None = None
+    memory_auto_learn: bool | None = None
+    memory_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
 
 
 def _read_settings(request: Request) -> DesktopSettings:
