@@ -324,7 +324,7 @@ export default function App() {
   }
 
   async function onPreviewFile(file: IndexedFile) {
-    if (file.status !== "parsed") return;
+    if (!["parsed", "indexed"].includes(file.status)) return;
     setPreviewLoading(true);
     setNotice("");
     try {
@@ -839,7 +839,7 @@ function FileRow({ file, table = false, onPreview }: { file: IndexedFile; table?
   if (table) {
     return (
       <div className="file-table-row phase2-table">
-        <button className="file-name-button" title={file.path} onClick={() => file.status === "parsed" && onPreview?.(file)} disabled={file.status !== "parsed"}>{file.filename}</button>
+        <button className="file-name-button" title={file.path} onClick={() => ["parsed", "indexed"].includes(file.status) && onPreview?.(file)} disabled={!["parsed", "indexed"].includes(file.status)}>{file.filename}</button>
         <span>{file.extension || "—"}</span>
         <span>{formatBytes(file.size)}</span>
         <code title={file.sha256 ?? ""}>{file.sha256 ? file.sha256.slice(0, 10) : "—"}</code>
