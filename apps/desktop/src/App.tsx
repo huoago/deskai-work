@@ -520,6 +520,20 @@ export default function App() {
     }
   }
 
+  async function onReactivateMemory(memoryId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await updateMemory(memoryId, { status: "active", reason: "desktop reactivate" });
+      await refreshWorkspaceData();
+      setNotice("记忆已恢复为活动状态。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "恢复记忆失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -708,6 +722,7 @@ export default function App() {
             onCreate={onCreateMemory}
             onUpdate={onUpdateMemory}
             onDeactivate={onDeactivateMemory}
+            onReactivate={onReactivateMemory}
           />
         ) : (
           <SettingsPage
@@ -1037,6 +1052,178 @@ function SearchPage({ workspace, query, setQuery, results, loading, knowledge, o
       </article>
     </section>
   );
+}
+
+function MemoryPage({ workspace, memories, status, disabled, onProcess, onRetry, onCreate, onUpdate, onDeactivate, onReactivate }: {
+  workspace: Workspace | null;
+  memories: MemoryRecord[];
+  status: MemoryStatus | null;
+  disabled: boolean;
+  onProcess: () => void;
+  onRetry: () => void;
+  onCreate: (payload: {
+    workspace_id: string | null;
+    type: string;
+    subject: string;
+    predicate: string;
+    value: string;
+    importance: number;
+  }) => Promise<void>;
+  onUpdate: (memoryId: string, value: string) => Promise<void>;
+  onDeactivate: (memoryId: string) => void;
+  onReactivate: (memoryId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [scope, setScope] = useState<"global" | "workspace">("workspace");
+  const [type, setType] = useState("decision");
+  const [subject, setSubject] = useState("");
+  const [predicate, setPredicate] = useState("");
+  const [value, setValue] = useState("");
+  const [importance, setImportance] = useState(0.8);
+  const [editingId, setEditingId] = useState("");
+  const [editingValue, setEditingValue] = useState("");
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return memories.filter((memory) => {
+      if (!showInactive && memory.status !== "active") return false;
+      if (!needle) return true;
+      const haystack = [
+        memory.type,
+        memory.subject,
+        memory.predicate,
+        renderMemoryValue(memory.value),
+        memory.workspace_id ? "workspace" : "global",
+      ].join(" ").toLocaleLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [memories, query, showInactive]);
+
+  const activeCount = memories.filter((item) => item.status === "active").length;
+  const globalCount = memories.filter((item) => item.status === "active" && item.workspace_id === null).length;
+  const workspaceCount = memories.filter((item) => item.status === "active" && item.workspace_id !== null).length;
+
+  async function submitMemory() {
+    if (!subject.trim() || !predicate.trim() || !value.trim()) return;
+    await onCreate({
+      workspace_id: scope === "global" ? null : workspace?.id ?? null,
+      type,
+      subject: subject.trim(),
+      predicate: predicate.trim(),
+      value: value.trim(),
+      importance,
+    });
+    setSubject("");
+    setPredicate("");
+    setValue("");
+  }
+
+  async function saveEdit(memory: MemoryRecord) {
+    if (!editingValue.trim()) return;
+    await onUpdate(memory.id, editingValue.trim());
+    setEditingId("");
+    setEditingValue("");
+  }
+
+  return (
+    <section className="memory-page">
+      <div className="knowledge-status-grid">
+        <Metric label="活动记忆" value={String(activeCount)} />
+        <Metric label="全局记忆" value={String(globalCount)} />
+        <Metric label="当前项目" value={String(workspaceCount)} />
+        <Metric label="Memory Worker" value={status?.running ? "运行中" : "未运行"} />
+      </div>
+
+      <div className="memory-layout">
+        <article className="panel memory-list-panel">
+          <div className="panel-head">
+            <div>
+              <h3>长期记忆</h3>
+              <p className="muted small">全局记忆跨 Workspace 使用；项目记忆只在当前 Workspace 生效。当前用户指令始终优先于旧记忆。</p>
+            </div>
+            <div className="button-row">
+              <button className="secondary" onClick={onProcess} disabled={disabled}>立即学习</button>
+              <button className="secondary" onClick={onRetry} disabled={disabled || ((status?.failed ?? 0) + (status?.blocked ?? 0) === 0)}>重试失败任务</button>
+            </div>
+          </div>
+
+          <div className="memory-toolbar">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索主题、规则、数值…" />
+            <label className="compact-check"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} />显示已停用</label>
+          </div>
+
+          {status?.last_error && <p className="provider-error">最近学习错误：{status.last_error}</p>}
+
+          <div className="memory-list">
+            {visible.map((memory) => (
+              <article className={`memory-card ${memory.status === "inactive" ? "inactive" : ""}`} key={memory.id}>
+                <div className="memory-card-head">
+                  <div className="memory-tags">
+                    <span>{memory.workspace_id ? "当前项目" : "全局"}</span>
+                    <span>{memory.type}</span>
+                    <span>{memory.source_type === "conversation" ? "对话学习" : "手工"}</span>
+                  </div>
+                  <span className={memory.status === "active" ? "memory-state active" : "memory-state"}>{memory.status === "active" ? "活动" : "已停用"}</span>
+                </div>
+                <h4>{memory.subject}</h4>
+                <p className="memory-predicate">{memory.predicate}</p>
+                {editingId === memory.id ? (
+                  <div className="memory-edit">
+                    <textarea value={editingValue} onChange={(event) => setEditingValue(event.target.value)} />
+                    <div className="button-row">
+                      <button className="primary" onClick={() => saveEdit(memory)} disabled={disabled || !editingValue.trim()}>保存修改</button>
+                      <button className="text-button" onClick={() => { setEditingId(""); setEditingValue(""); }}>取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <pre className="memory-value">{renderMemoryValue(memory.value)}</pre>
+                )}
+                <div className="memory-card-foot">
+                  <span>置信度 {Math.round(memory.confidence * 100)}%</span>
+                  <span>重要度 {Math.round(memory.importance * 100)}%</span>
+                  <span>{formatDate(memory.updated_at)}</span>
+                  <div className="memory-actions">
+                    {memory.status === "active" && (
+                      <>
+                        <button className="text-button" onClick={() => { setEditingId(memory.id); setEditingValue(renderMemoryValue(memory.value)); }} disabled={disabled}>修改</button>
+                        <button className="text-button danger" onClick={() => onDeactivate(memory.id)} disabled={disabled}>停用</button>
+                      </>
+                    )}
+                    {memory.status === "inactive" && <button className="text-button" onClick={() => onReactivate(memory.id)} disabled={disabled}>恢复</button>}
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!visible.length && <p className="muted">当前筛选条件下没有记忆。</p>}
+          </div>
+        </article>
+
+        <aside className="panel memory-create-panel">
+          <div className="panel-head">
+            <div><h3>手工新增记忆</h3><p className="muted small">适合明确的长期规则、决定或项目状态。敏感个人信息和密钥会被后端拒绝。</p></div>
+          </div>
+          <label>作用范围<select value={scope} onChange={(event) => setScope(event.target.value as "global" | "workspace")}><option value="workspace">当前 Workspace</option><option value="global">全局</option></select></label>
+          <label>类型<select value={type} onChange={(event) => setType(event.target.value)}><option value="preference">preference</option><option value="decision">decision</option><option value="constraint">constraint</option><option value="correction">correction</option><option value="project_state">project_state</option><option value="workflow">workflow</option><option value="person_role">person_role</option></select></label>
+          <label>主题<input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="例如：技术报告" /></label>
+          <label>属性<input value={predicate} onChange={(event) => setPredicate(event.target.value)} placeholder="例如：默认语言" /></label>
+          <label>值<textarea value={value} onChange={(event) => setValue(event.target.value)} placeholder="例如：中文" /></label>
+          <label>重要度<input type="range" min="0" max="1" step="0.05" value={importance} onChange={(event) => setImportance(Number(event.target.value))} /><span className="range-value">{Math.round(importance * 100)}%</span></label>
+          <button className="primary full" onClick={submitMemory} disabled={disabled || !subject.trim() || !predicate.trim() || !value.trim()}>保存记忆</button>
+          <p className="memory-policy-note">自动学习只从用户对话中提取长期信息；文件中的工程事实继续由 Knowledge Base 管理，不重复写入 Memory。</p>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function renderMemoryValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, apiKeyDraft, setApiKeyDraft, providerAction, onSaveApiKey, onDeleteApiKey, onTestProvider }: {
