@@ -23,6 +23,8 @@ class Settings:
     watcher_interval_seconds: float = 2.0
     parser_worker_enabled: bool = True
     parser_worker_interval_seconds: float = 0.75
+    knowledge_worker_enabled: bool = True
+    knowledge_worker_interval_seconds: float = 1.0
 
     @classmethod
     def load(cls, *, session_token: str | None = None) -> "Settings":
@@ -36,6 +38,11 @@ class Settings:
             parser_worker_interval_seconds=max(
                 float(os.environ.get("DESKAI_PARSER_WORKER_INTERVAL", "0.75")), 0.25
             ),
+            knowledge_worker_enabled=os.environ.get("DESKAI_KNOWLEDGE_WORKER_ENABLED", "1")
+            not in {"0", "false", "False"},
+            knowledge_worker_interval_seconds=max(
+                float(os.environ.get("DESKAI_KNOWLEDGE_WORKER_INTERVAL", "1.0")), 0.25
+            ),
         )
 
     @property
@@ -45,6 +52,10 @@ class Settings:
     @property
     def database_url(self) -> str:
         return f"sqlite+pysqlite:///{self.database_path.as_posix()}"
+
+    @property
+    def vector_path(self) -> Path:
+        return self.data_dir / "vectors" / "lancedb"
 
     def ensure_directories(self) -> None:
         for child in (
