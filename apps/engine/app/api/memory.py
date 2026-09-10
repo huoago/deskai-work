@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+
+from app.database.models import MemoryLearningJob
 
 router = APIRouter(tags=["memory"])
 
@@ -58,10 +60,25 @@ def memory_status(request: Request, workspace_id: str | None = Query(default=Non
         include_inactive=False,
     )
     snapshot = request.app.state.memory_worker.snapshot().as_dict()
+    with request.app.state.database.session() as session:
+        statement = select(
+            MemoryLearningJob.status,
+            func.count(MemoryLearningJob.id),
+        ).group_by(MemoryLearningJob.status)
+        if workspace_id:
+            statement = statement.where(MemoryLearningJob.workspace_id == workspace_id)
+        job_counts = {
+            str(job_status): int(count)
+            for job_status, count in session.execute(statement).all()
+        }
     snapshot.update(
         {
             "workspace_id": workspace_id,
             "active_memories": len(memories),
+            "queued_jobs": job_counts.get("queued", 0),
+            "processing_jobs": job_counts.get("processing", 0),
+            "failed_jobs": job_counts.get("failed", 0),
+            "blocked_jobs": job_counts.get("blocked", 0),
         }
     )
     return snapshot
