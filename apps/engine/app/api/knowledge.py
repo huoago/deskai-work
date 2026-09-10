@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+
+from app.database.models import Chunk, File
+
+router = APIRouter(tags=["knowledge"])
+
+
+class SearchRequest(BaseModel):
+    workspace_id: str
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(default=8, ge=1, le=50)
+
+
+@router.get("/knowledge/status")
+def knowledge_status(request: Request, workspace_id: str | None = Query(default=None)) -> dict:
+    snapshot = request.app.state.knowledge_indexer.snapshot().as_dict()
+    with request.app.state.database.session() as session:
+        file_query = select(File.status, func.count(File.id)).group_by(File.status)
+        chunk_query = select(func.count(Chunk.id)).where(Chunk.active.is_(True))
+        if workspace_id:
+            file_query = file_query.where(File.workspace_id == workspace_id)
+            chunk_query = chunk_query.where(Chunk.workspace_id == workspace_id)
+        rows = session.execute(file_query).all()
+        counts = {status: count for status, count in rows}
+        active_chunks = int(session.scalar(chunk_query) or 0)
+
+    snapshot.update(
+        {
+            "workspace_id": workspace_id,
+            "parsed_files": counts.get("parsed", 0),
+            "indexed_files": counts.get("indexed", 0),
+            "index_failed_files": counts.get("index_failed", 0),
+            "active_chunks": active_chunks,
+        }
+    )
+    return snapshot
+
+
+@router.post("/knowledge/process")
+def process_knowledge_queue(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    processed = request.app.state.knowledge_indexer.process_available(limit=limit)
+    return {
+        "processed": processed,
+        "status": request.app.state.knowledge_indexer.snapshot().as_dict(),
+    }
+
+
+@router.post("/knowledge/files/{file_id}/retry")
+def retry_knowledge_file(file_id: str, request: Request) -> dict:
+    if not request.app.state.knowledge_indexer.retry_file(file_id):
+        raise HTTPException(status_code=409, detail="File is not eligible for knowledge-index retry")
+    return {"queued": True, "file_id": file_id}
+
+
+@router.post("/search")
+def search_knowledge(payload: SearchRequest, request: Request) -> dict:
+    results = request.app.state.hybrid_search.search(
+        payload.workspace_id,
+        payload.query,
+        payload.limit,
+    )
+    return {
+        "workspace_id": payload.workspace_id,
+        "query": payload.query,
+        "count": len(results),
+        "results": results,
+    }
