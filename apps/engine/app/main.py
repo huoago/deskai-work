@@ -16,6 +16,7 @@ from app.api.workspaces import router as workspace_router
 from app.core.config import Settings
 from app.database.migrate import run_migrations
 from app.database.session import Database
+from app.indexing.watcher import WorkspaceWatcher
 
 ALLOWED_DESKTOP_ORIGINS = [
     "http://127.0.0.1:1420",
@@ -35,14 +36,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         run_migrations(resolved.database_url)
         app.state.database = Database(resolved.database_url, resolved.database_path)
         app.state.session_token = resolved.session_token
+        watcher = WorkspaceWatcher(
+            app.state.database,
+            interval_seconds=resolved.watcher_interval_seconds,
+        )
+        app.state.workspace_watcher = watcher
+        if resolved.watcher_enabled:
+            watcher.start()
         try:
             yield
         finally:
+            watcher.stop()
             app.state.database.dispose()
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
