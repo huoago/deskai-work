@@ -30,3 +30,18 @@ Local Only mode is a hard policy boundary. Until a local model provider exists, 
 ## Retrieved-content trust
 
 Files inside an authorized Workspace are readable data, not trusted instructions. Retrieved document text is wrapped as untrusted reference material and is subordinate to DeskAI's system instructions. Tool execution remains disabled during Phase 5, reducing the impact of prompt injection before later Agent phases add explicit permissions, confirmations, and audit controls.
+
+
+## Long-term memory boundary
+
+Phase 6 separates durable Memory from the document Knowledge Base.
+
+Automatic Memory learning uses only user conversation content as the authoritative source. Assistant-generated answers and retrieved file contents are not independently promoted into Memory.
+
+The model-side extractor is constrained to a Structured Output schema, and the Engine independently applies type, scope, confidence, importance, size, and sensitivity checks before persistence.
+
+Automatic and manual Memory rejects obvious credentials and sensitive personal information, including passwords, API keys/tokens, payment-card credentials, government identifiers, health/medical information, race/ethnicity, religion, political affiliation, sexual orientation/sex-life information, and trade-union membership.
+
+Memory changes are reviewable. A changed value is versioned in `memory_versions`; deactivation is soft and reversible. Workspace memories do not cross project boundaries, while global memory is limited to durable cross-project preferences, constraints, and workflows.
+
+During chat, Memory is context below the current user instruction. A current user instruction overrides conflicting stored Memory. Memory is not represented as a file citation.
