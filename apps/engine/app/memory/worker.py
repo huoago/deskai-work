@@ -167,50 +167,51 @@ class MemoryWorker:
 
     def _claim_next(self) -> dict | None:
         with self.database.session() as session:
-            job = session.scalar(
-                select(MemoryLearningJob)
-                .where(MemoryLearningJob.status == "queued")
-                .order_by(MemoryLearningJob.created_at, MemoryLearningJob.id)
-                .limit(1)
-            )
-            if job is None:
-                return None
+            while True:
+                job = session.scalar(
+                    select(MemoryLearningJob)
+                    .where(MemoryLearningJob.status == "queued")
+                    .order_by(MemoryLearningJob.created_at, MemoryLearningJob.id)
+                    .limit(1)
+                )
+                if job is None:
+                    return None
 
-            message = session.get(Message, job.source_message_id)
-            conversation = session.get(Conversation, job.conversation_id)
-            if message is None or conversation is None:
-                job.status = "failed"
-                job.error_message = "Source conversation or message no longer exists"
+                message = session.get(Message, job.source_message_id)
+                conversation = session.get(Conversation, job.conversation_id)
+                if message is None or conversation is None:
+                    job.status = "failed"
+                    job.error_message = "Source conversation or message no longer exists"
+                    job.attempts += 1
+                    continue
+
+                settings = _settings(session)
+                job.status = "processing"
                 job.attempts += 1
-                return {"job_id": job.id, "invalid": True}
+                history = session.scalars(
+                    select(Message)
+                    .where(Message.conversation_id == job.conversation_id)
+                    .order_by(Message.created_at, Message.id)
+                ).all()
+                previous: list[str] = []
+                for item in history:
+                    if item.id == message.id:
+                        break
+                    if item.role in {"user", "assistant"}:
+                        previous.append(f"{item.role}: {item.content}")
+                context = "\n".join(previous[-6:])[-12000:]
 
-            settings = _settings(session)
-            job.status = "processing"
-            job.attempts += 1
-            history = session.scalars(
-                select(Message)
-                .where(Message.conversation_id == job.conversation_id)
-                .order_by(Message.created_at, Message.id)
-            ).all()
-            previous: list[str] = []
-            for item in history:
-                if item.id == message.id:
-                    break
-                if item.role in {"user", "assistant"}:
-                    previous.append(f"{item.role}: {item.content}")
-            context = "\n".join(previous[-6:])[-12000:]
-
-            return {
-                "job_id": job.id,
-                "workspace_id": job.workspace_id,
-                "source_message_id": job.source_message_id,
-                "current_user_message": message.content,
-                "conversation_context": context,
-                "privacy_mode": str(settings["privacy_mode"]),
-                "model": str(settings["default_model"]),
-                "auto_learn": bool(settings["memory_auto_learn"]),
-                "min_confidence": float(settings["memory_min_confidence"]),
-            }
+                return {
+                    "job_id": job.id,
+                    "workspace_id": job.workspace_id,
+                    "source_message_id": job.source_message_id,
+                    "current_user_message": message.content,
+                    "conversation_context": context,
+                    "privacy_mode": str(settings["privacy_mode"]),
+                    "model": str(settings["default_model"]),
+                    "auto_learn": bool(settings["memory_auto_learn"]),
+                    "min_confidence": float(settings["memory_min_confidence"]),
+                }
 
     def _complete(
         self,
