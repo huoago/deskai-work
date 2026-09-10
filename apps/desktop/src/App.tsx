@@ -6,6 +6,7 @@ import {
   createWorkspace,
   getDesktopSettings,
   getIndexQueueSummary,
+  getKnowledgeStatus,
   getParsedPreview,
   getParserStatus,
   getWorkspaceWatcherStatus,
@@ -14,9 +15,11 @@ import {
   listMessages,
   listWorkspaceRoots,
   listWorkspaces,
+  processKnowledgeQueue,
   processParserQueue,
   revokeWorkspaceRoot,
   scanWorkspace,
+  searchKnowledge,
   streamChat,
   updateDesktopSettings,
   updateWorkspaceRoot,
@@ -26,8 +29,10 @@ import {
   type EngineConnection,
   type IndexedFile,
   type IndexQueueSummary,
+  type KnowledgeStatus,
   type ParsedPreview,
   type ParserStatus,
+  type SearchHit,
   type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
@@ -38,12 +43,13 @@ type EngineState =
   | { kind: "online"; connection: EngineConnection }
   | { kind: "offline"; message: string };
 
-type Page = "chat" | "workspace" | "files" | "settings";
+type Page = "chat" | "workspace" | "files" | "search" | "settings";
 
 const nav: Array<{ id: Page | "tasks" | "memory" | "activity"; label: string; enabled: boolean; phase?: string }> = [
   { id: "chat", label: "对话", enabled: true },
   { id: "workspace", label: "工作区", enabled: true },
   { id: "files", label: "文件", enabled: true },
+  { id: "search", label: "资料检索", enabled: true },
   { id: "tasks", label: "任务", enabled: false, phase: "Phase 7" },
   { id: "memory", label: "记忆", enabled: false, phase: "Phase 6" },
   { id: "activity", label: "活动", enabled: false, phase: "Phase 7" },
@@ -75,6 +81,10 @@ export default function App() {
   const [watcher, setWatcher] = useState<WatcherStatus | null>(null);
   const [queue, setQueue] = useState<IndexQueueSummary>(emptyQueue);
   const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null);
+  const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [preview, setPreview] = useState<ParsedPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
@@ -124,6 +134,8 @@ export default function App() {
       setWatcher(null);
       setQueue(emptyQueue);
       setParserStatus(null);
+      setKnowledgeStatus(null);
+      setSearchResults([]);
       setPreview(null);
       setActiveConversationId("");
       setMessages([]);
@@ -145,19 +157,21 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files"].includes(page)) return;
+    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
         listFiles(activeWorkspaceId),
         getWorkspaceWatcherStatus(activeWorkspaceId),
         getIndexQueueSummary(activeWorkspaceId),
         getParserStatus(),
+        getKnowledgeStatus(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
           setParserStatus(nextParserStatus);
+          setKnowledgeStatus(nextKnowledgeStatus);
         })
         .catch(() => undefined);
     }, 3000);
@@ -175,13 +189,14 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
       getWorkspaceWatcherStatus(workspaceId),
       getIndexQueueSummary(workspaceId),
       getParserStatus(),
+      getKnowledgeStatus(workspaceId),
     ]);
     setRoots(nextRoots);
     setFiles(nextFiles);
@@ -189,6 +204,7 @@ export default function App() {
     setWatcher(nextWatcher);
     setQueue(nextQueue);
     setParserStatus(nextParserStatus);
+    setKnowledgeStatus(nextKnowledgeStatus);
     setActiveConversationId((current) => {
       if (current && nextConversations.some((item) => item.id === current)) return current;
       return nextConversations[0]?.id ?? "";
@@ -303,6 +319,39 @@ export default function App() {
       setNotice(error instanceof Error ? error.message : "读取解析预览失败");
     } finally {
       setPreviewLoading(false);
+    }
+  }
+
+  async function onProcessKnowledgeQueue() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await processKnowledgeQueue(100);
+      if (activeWorkspaceId) {
+        await refreshWorkspaceData();
+        setKnowledgeStatus(await getKnowledgeStatus(activeWorkspaceId));
+      }
+      setNotice(`知识库更新完成：本次处理 ${result.processed} 个已解析文件。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "知识库更新失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSearchKnowledge() {
+    const query = searchQuery.trim();
+    if (!activeWorkspaceId || !query || searchLoading) return;
+    setSearchLoading(true);
+    setNotice("");
+    try {
+      const response = await searchKnowledge(activeWorkspaceId, query, 12);
+      setSearchResults(response.results);
+    } catch (error) {
+      setSearchResults([]);
+      setNotice(error instanceof Error ? error.message : "资料检索失败");
+    } finally {
+      setSearchLoading(false);
     }
   }
 
@@ -461,6 +510,18 @@ export default function App() {
             onProcessQueue={onProcessParserQueue}
             onPreview={onPreviewFile}
             onClosePreview={() => setPreview(null)}
+            disabled={!online || busy}
+          />
+        ) : page === "search" ? (
+          <SearchPage
+            workspace={activeWorkspace}
+            query={searchQuery}
+            setQuery={setSearchQuery}
+            results={searchResults}
+            loading={searchLoading}
+            knowledge={knowledgeStatus}
+            onSearch={onSearchKnowledge}
+            onProcess={onProcessKnowledgeQueue}
             disabled={!online || busy}
           />
         ) : (
@@ -710,6 +771,69 @@ function FileRow({ file, table = false, onPreview }: { file: IndexedFile; table?
   );
 }
 
+function SearchPage({ workspace, query, setQuery, results, loading, knowledge, onSearch, onProcess, disabled }: {
+  workspace: Workspace | null;
+  query: string;
+  setQuery: (value: string) => void;
+  results: SearchHit[];
+  loading: boolean;
+  knowledge: KnowledgeStatus | null;
+  onSearch: () => void;
+  onProcess: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <section className="search-page">
+      <div className="knowledge-status-grid">
+        <Metric label="已索引文件" value={String(knowledge?.indexed_files ?? 0)} />
+        <Metric label="活动 Chunk" value={String(knowledge?.active_chunks ?? 0)} />
+        <Metric label="待建立知识库" value={String(knowledge?.parsed_files ?? 0)} />
+        <Metric label="知识 Worker" value={knowledge?.running ? "运行中" : "未运行"} />
+      </div>
+      <article className="panel search-panel">
+        <div className="panel-head">
+          <div>
+            <h3>本地资料检索</h3>
+            <p className="muted small">当前工作区：{workspace?.name ?? "未选择"} · FTS5 + 本地向量融合 · 结果只来自当前有效文件版本</p>
+          </div>
+          <button className="secondary" onClick={onProcess} disabled={disabled || (knowledge?.parsed_files ?? 0) === 0}>立即更新知识库</button>
+        </div>
+        <div className="knowledge-search-row">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="例如：324水表数量、RRP-04、DN1500、某份报告中的结论…"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onSearch();
+            }}
+          />
+          <button className="primary" onClick={onSearch} disabled={disabled || loading || !query.trim()}>
+            {loading ? "检索中…" : "检索"}
+          </button>
+        </div>
+        <div className="search-results">
+          {results.map((hit) => (
+            <article className="search-hit" key={hit.chunk_id}>
+              <div className="search-hit-head">
+                <strong>{hit.citation_label}</strong>
+                <span>融合得分 {hit.score.toFixed(4)}</span>
+              </div>
+              <p>{hit.snippet}</p>
+              <div className="search-hit-meta">
+                <span>FTS {hit.lexical_rank ?? "—"}</span>
+                <span>Vector {hit.vector_rank ?? "—"}</span>
+                <span>{hit.embedding_provider}</span>
+              </div>
+            </article>
+          ))}
+          {!loading && query.trim() && !results.length && <p className="muted">没有找到匹配的当前版本资料。</p>}
+          {!query.trim() && <p className="muted">输入关键词、工程编号、数量或资料中的短语开始检索。</p>}
+        </div>
+      </article>
+    </section>
+  );
+}
+
 function SettingsPage({ values, onChange, dirty, busy, onSave }: { values: DesktopSettings; onChange: (values: DesktopSettings) => void; dirty: boolean; busy: boolean; onSave: () => void }) {
   return (
     <section className="settings-grid">
@@ -722,8 +846,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave }: { values: Deskt
         <button className="primary save-settings" disabled={!dirty || busy || !values.default_model.trim()} onClick={onSave}>{busy ? "保存中…" : dirty ? "保存设置" : "已保存"}</button>
       </article>
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 3</span></div>
-        <div className="security-list"><p><b>✓</b> Engine 仅监听 127.0.0.1</p><p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p><p><b>✓</b> Scanner/Watcher/Parser 仅访问授权目录</p><p><b>✓</b> 解析结果仅写本地 cache/document</p><p><b>✓</b> Phase 3 不发送文件内容到云端</p></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 4</span></div>
+        <div className="security-list"><p><b>✓</b> Engine 仅监听 127.0.0.1</p><p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p><p><b>✓</b> Scanner/Watcher/Parser 仅访问授权目录</p><p><b>✓</b> Chunk、FTS5 与 LanceDB 均存放在本机</p><p><b>✓</b> 当前检索不发送资料内容到云端</p></div>
       </article>
     </section>
   );
@@ -737,6 +861,7 @@ function pageTitle(page: Page) {
   if (page === "chat") return "工作对话";
   if (page === "workspace") return "工作区与资料授权";
   if (page === "files") return "文件解析与预览";
+  if (page === "search") return "资料检索与引用";
   return "设置";
 }
 
