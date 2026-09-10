@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import AsyncIterator, Any
 
@@ -28,6 +29,99 @@ class OpenAIChatProvider:
             return {"ok": True, "model": getattr(result, "id", model)}
         except OpenAIError as exc:
             raise ProviderError(str(exc)) from exc
+
+
+    async def extract_memories(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        current_user_message: str,
+        conversation_context: str,
+    ) -> list[dict[str, Any]]:
+        schema = {
+            "type": "object",
+            "properties": {
+                "memories": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "scope": {"type": "string", "enum": ["global", "workspace"]},
+                            "type": {
+                                "type": "string",
+                                "enum": [
+                                    "preference",
+                                    "decision",
+                                    "constraint",
+                                    "correction",
+                                    "project_state",
+                                    "workflow",
+                                    "person_role",
+                                ],
+                            },
+                            "subject": {"type": "string", "maxLength": 500},
+                            "predicate": {"type": "string", "maxLength": 255},
+                            "value": {"type": "string", "maxLength": 4000},
+                            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                            "importance": {"type": "number", "minimum": 0, "maximum": 1},
+                        },
+                        "required": [
+                            "scope",
+                            "type",
+                            "subject",
+                            "predicate",
+                            "value",
+                            "confidence",
+                            "importance",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["memories"],
+            "additionalProperties": False,
+        }
+        instructions = """Extract only durable user-provided memories from the CURRENT USER MESSAGE.
+
+The previous conversation is context only for resolving references such as 'that' or 'from now on'. Never turn assistant-generated claims into memory unless the current user message explicitly confirms or corrects them.
+
+Store only durable preferences, decisions, constraints, corrections, project state, workflows, and person/role relationships. Do not store transient requests, greetings, file contents, model answers, or facts that merely appear in retrieved documents.
+
+Never extract passwords, API keys, tokens, financial credentials, government identifiers, health/medical information, race/ethnicity, religion, political affiliation, sexual orientation/sex life, or trade-union membership.
+
+Use scope=global only for durable cross-project preferences/constraints/workflows. Use scope=workspace for project-specific items. If nothing clearly deserves long-term memory, return an empty memories array."""
+        user_input = (
+            "<previous_context>\n"
+            + conversation_context
+            + "\n</previous_context>\n\n"
+            + "<current_user_message>\n"
+            + current_user_message
+            + "\n</current_user_message>"
+        )
+        try:
+            client = AsyncOpenAI(api_key=api_key)
+            response = await client.responses.create(
+                model=model,
+                instructions=instructions,
+                input=[{"role": "user", "content": user_input}],
+                reasoning={"effort": "low"},
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "deskai_memory_extraction",
+                        "strict": True,
+                        "schema": schema,
+                    }
+                },
+                store=False,
+            )
+            payload = json.loads(response.output_text or '{"memories":[]}')
+            memories = payload.get("memories", [])
+            return memories if isinstance(memories, list) else []
+        except (OpenAIError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProviderError(f"Memory extraction failed: {exc}") from exc
 
     async def stream_response(
         self,
