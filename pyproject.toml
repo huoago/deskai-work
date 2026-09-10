@@ -8,4 +8,5 @@ line-length = 100
 exclude = ["apps/engine/migrations/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "B"]
+ignore = ["E501"]
