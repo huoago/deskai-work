@@ -207,6 +207,9 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         model = str(_chat_setting(session, "default_model"))
         reasoning_effort = str(_chat_setting(session, "reasoning_level"))
         memory_auto_learn = bool(_chat_setting(session, "memory_auto_learn"))
+        effective_workspace_id = payload.workspace_id or (
+            conversation.workspace_id if conversation is not None else None
+        )
 
     if privacy_mode == "local":
         raise HTTPException(
@@ -222,11 +225,11 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         )
 
     hits: list[dict[str, Any]] = []
-    if payload.workspace_id:
-        hits = request.app.state.hybrid_search.search(payload.workspace_id, message_text, limit=8)
+    if effective_workspace_id:
+        hits = request.app.state.hybrid_search.search(effective_workspace_id, message_text, limit=8)
     retrieved_context = build_retrieved_context(hits)
     memory_hits = request.app.state.memory_service.retrieve(
-        workspace_id=payload.workspace_id,
+        workspace_id=effective_workspace_id,
         query=message_text,
         limit=8,
     )
@@ -240,7 +243,7 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
     with request.app.state.database.session() as session:
         if conversation is None:
             title = message_text.replace("\n", " ")[:60]
-            conversation = Conversation(workspace_id=payload.workspace_id, title=title)
+            conversation = Conversation(workspace_id=effective_workspace_id, title=title)
             session.add(conversation)
             session.flush()
 
@@ -384,7 +387,7 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         memory_job_id = None
         if memory_auto_learn:
             memory_job = request.app.state.memory_service.enqueue_learning(
-                workspace_id=payload.workspace_id,
+                workspace_id=effective_workspace_id,
                 conversation_id=conversation_id,
                 source_message_id=user_message_id,
             )
