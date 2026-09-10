@@ -199,6 +199,10 @@ export type MemoryStatus = {
   last_error: string | null;
   workspace_id: string | null;
   active_memories: number;
+  queued_jobs: number;
+  processing_jobs: number;
+  failed_jobs: number;
+  blocked_jobs: number;
 };
 
 export type DesktopSettings = {
