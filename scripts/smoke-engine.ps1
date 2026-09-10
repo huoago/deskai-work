@@ -11,7 +11,14 @@ try {
     Start-Sleep -Milliseconds 500
     try {
       $health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 2
-      if ($health.status -eq "ok") { Write-Host "Packaged engine health OK: $($health.version)"; return }
+      if ($health.status -eq "ok") {
+        $provider = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/providers/openai/status" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 3
+        if ($null -eq $provider.configured -or $provider.model -ne "gpt-5.6-sol") {
+          throw "Packaged provider endpoint returned an invalid payload."
+        }
+        Write-Host "Packaged engine health OK: $($health.version); OpenAI provider endpoint OK."
+        return
+      }
     } catch {}
   } while ((Get-Date) -lt $deadline)
   throw "Packaged deskai-engine did not become healthy within 20 seconds."
