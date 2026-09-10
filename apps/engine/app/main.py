@@ -6,10 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.chat import router as chat_router
 from app.api.errors import AppError, app_error_handler
 from app.api.files import router as files_router
 from app.api.health import router as health_router
 from app.api.roots import router as roots_router
+from app.api.settings import router as settings_router
 from app.api.workspaces import router as workspace_router
 from app.core.config import Settings
 from app.database.migrate import run_migrations
@@ -74,4 +76,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(workspace_router)
     app.include_router(roots_router)
     app.include_router(files_router)
+    app.include_router(chat_router)
+    app.include_router(settings_router)
     return app
