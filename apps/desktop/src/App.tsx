@@ -1132,6 +1132,7 @@ function MemoryPage({ workspace, memories, status, disabled, onProcess, onRetry,
         <Metric label="活动记忆" value={String(activeCount)} />
         <Metric label="全局记忆" value={String(globalCount)} />
         <Metric label="当前项目" value={String(workspaceCount)} />
+        <Metric label="待学习任务" value={String(status?.queued_jobs ?? 0)} />
         <Metric label="Memory Worker" value={status?.running ? "运行中" : "未运行"} />
       </div>
 
@@ -1144,7 +1145,7 @@ function MemoryPage({ workspace, memories, status, disabled, onProcess, onRetry,
             </div>
             <div className="button-row">
               <button className="secondary" onClick={onProcess} disabled={disabled}>立即学习</button>
-              <button className="secondary" onClick={onRetry} disabled={disabled || ((status?.failed ?? 0) + (status?.blocked ?? 0) === 0)}>重试失败任务</button>
+              <button className="secondary" onClick={onRetry} disabled={disabled || ((status?.failed_jobs ?? 0) + (status?.blocked_jobs ?? 0) === 0)}>重试失败任务</button>
             </div>
           </div>
 
