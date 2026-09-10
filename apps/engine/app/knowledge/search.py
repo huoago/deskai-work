@@ -8,6 +8,8 @@ from sqlalchemy import select
 from app.database.models import Chunk, File
 from app.database.session import Database
 from app.knowledge.embedding import EMBEDDING_PROVIDER, embed_text
+
+MIN_VECTOR_SIMILARITY = 0.18
 from app.knowledge.fts import search_fts
 from app.knowledge.vector_store import LanceVectorStore
 
@@ -55,9 +57,10 @@ class HybridSearch:
         with self.database.session() as session:
             lexical = search_fts(session, workspace_id, query, candidate_limit)
 
+        query_vector = embed_text(query)
         vector_rows = self.vector_store.search(
             workspace_id,
-            embed_text(query),
+            query_vector,
             candidate_limit,
         )
 
@@ -91,11 +94,16 @@ class HybridSearch:
         for chunk, file in rows:
             l_rank = lexical_rank.get(chunk.id)
             v_rank = vector_rank.get(chunk.id)
+            similarity = _cosine_similarity(query_vector, embed_text(chunk.content))
+            if l_rank is None and similarity < MIN_VECTOR_SIMILARITY:
+                continue
+
             score = 0.0
             if l_rank is not None:
                 score += 1.0 / (60.0 + l_rank)
-            if v_rank is not None:
+            if v_rank is not None and similarity >= MIN_VECTOR_SIMILARITY:
                 score += 0.85 / (60.0 + v_rank)
+                score += similarity * 0.01
 
             content_lower = chunk.content.lower()
             filename_lower = file.filename.lower()
@@ -172,3 +180,7 @@ def _snippet(content: str, query: str, width: int = 360) -> str:
     prefix = "…" if start else ""
     suffix = "…" if end < len(content) else ""
     return prefix + content[start:end].strip() + suffix
+
+
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    return sum(a * b for a, b in zip(left, right, strict=True))
