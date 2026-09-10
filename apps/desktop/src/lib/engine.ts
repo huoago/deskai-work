@@ -35,6 +35,36 @@ export type IndexedFile = {
   sha256: string | null;
   status: string;
   modified_at: string | null;
+  queue_status: string | null;
+};
+
+export type ScanSummary = {
+  discovered: number;
+  queued: number;
+  unchanged: number;
+  unsupported: number;
+  skipped: number;
+  deleted: number;
+};
+
+export type WatcherStatus = {
+  running: boolean;
+  watched_roots: number;
+  workspace_watched_roots: number;
+  workspace_watching: boolean;
+  cycles: number;
+  last_cycle_at: string | null;
+  last_error: string | null;
+  last_summary: ScanSummary;
+};
+
+export type IndexQueueSummary = {
+  queued: number;
+  processing: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  total: number;
 };
 
 export type Conversation = {
@@ -117,11 +147,17 @@ export function createWorkspace(name: string): Promise<Workspace> {
 }
 
 export async function addWorkspaceRoot(workspaceId: string, path: string) {
-  return request<{ root: WorkspaceRoot; scan: Record<string, number> | null }>(
+  return request<{ root: WorkspaceRoot; scan: ScanSummary | null }>(
     `/workspaces/${workspaceId}/roots`,
     {
       method: "POST",
-      body: JSON.stringify({ path, read_allowed: true, write_allowed: false, watch_enabled: true, scan_now: true }),
+      body: JSON.stringify({
+        path,
+        read_allowed: true,
+        write_allowed: false,
+        watch_enabled: true,
+        scan_now: true,
+      }),
     },
   );
 }
@@ -130,8 +166,38 @@ export function listWorkspaceRoots(workspaceId: string): Promise<WorkspaceRoot[]
   return request<WorkspaceRoot[]>(`/workspaces/${workspaceId}/roots`);
 }
 
+export function updateWorkspaceRoot(
+  workspaceId: string,
+  rootId: string,
+  changes: Partial<Pick<WorkspaceRoot, "read_allowed" | "write_allowed" | "watch_enabled">> & { scan_now?: boolean },
+): Promise<{ root: WorkspaceRoot; scan: ScanSummary | null; revoked_files: number }> {
+  return request(`/workspaces/${workspaceId}/roots/${rootId}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+export function revokeWorkspaceRoot(
+  workspaceId: string,
+  rootId: string,
+): Promise<{ revoked: boolean; path: string; revoked_files: number }> {
+  return request(`/workspaces/${workspaceId}/roots/${rootId}`, { method: "DELETE" });
+}
+
+export function scanWorkspace(workspaceId: string): Promise<{ roots: number; summary: ScanSummary }> {
+  return request(`/workspaces/${workspaceId}/scan`, { method: "POST" });
+}
+
+export function getWorkspaceWatcherStatus(workspaceId: string): Promise<WatcherStatus> {
+  return request<WatcherStatus>(`/workspaces/${workspaceId}/watcher`);
+}
+
 export function listFiles(workspaceId: string): Promise<IndexedFile[]> {
   return request<IndexedFile[]>(`/files?workspace_id=${encodeURIComponent(workspaceId)}`);
+}
+
+export function getIndexQueueSummary(workspaceId: string): Promise<IndexQueueSummary> {
+  return request<IndexQueueSummary>(`/index-jobs/summary?workspace_id=${encodeURIComponent(workspaceId)}`);
 }
 
 export function listConversations(workspaceId?: string): Promise<Conversation[]> {
