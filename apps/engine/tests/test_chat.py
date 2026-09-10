@@ -35,10 +35,16 @@ class FakeOpenAIProvider:
     def __init__(self) -> None:
         self.calls: list[dict] = []
         self.test_calls: list[dict] = []
+        self.memory_calls: list[dict] = []
+        self.memory_candidates: list[dict] = []
 
     async def test_connection(self, *, api_key: str, model: str) -> dict:
         self.test_calls.append({"api_key": api_key, "model": model})
         return {"ok": True, "model": model}
+
+    async def extract_memories(self, **kwargs):
+        self.memory_calls.append(kwargs)
+        return list(self.memory_candidates)
 
     async def stream_response(self, **kwargs):
         self.calls.append(kwargs)
@@ -113,6 +119,7 @@ def test_phase5_chat_stream_uses_local_rag_and_persists_real_citation(client, tm
     assert meta["model"] == "gpt-5.6-sol"
     assert meta["privacy_mode"] == "hybrid"
     assert meta["source_count"] >= 1
+    assert meta["memory_count"] == 0
 
     assert len(provider.calls) == 1
     call = provider.calls[0]
@@ -129,6 +136,7 @@ def test_phase5_chat_stream_uses_local_rag_and_persists_real_citation(client, tm
     assert done["response_id"] == "resp_test_phase5"
     assert done["input_tokens"] == 123
     assert done["output_tokens"] == 45
+    assert done["memory_job_id"] is not None
     assert len(done["citations"]) == 1
     assert done["citations"][0]["source_index"] == 1
     assert done["citations"][0]["label"].startswith("324-meter-plan.md")
