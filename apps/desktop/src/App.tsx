@@ -406,6 +406,11 @@ export default function App() {
       setPendingUser("");
       setStreamingText("");
     } catch (error) {
+      setPendingUser("");
+      setStreamingText("");
+      if (resolvedConversationId) {
+        listMessages(resolvedConversationId).then(setMessages).catch(() => undefined);
+      }
       setNotice(error instanceof Error ? error.message : "发送失败");
     } finally {
       setChatStreaming(false);
