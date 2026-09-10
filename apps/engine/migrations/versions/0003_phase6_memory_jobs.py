@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect
 
 revision = "0003"
 down_revision = "0002"
@@ -16,6 +17,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if inspect(bind).has_table("memory_learning_jobs"):
+        return
+
     op.create_table(
         "memory_learning_jobs",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -65,6 +70,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    if not inspect(bind).has_table("memory_learning_jobs"):
+        return
     op.drop_index("ix_memory_learning_jobs_conversation_id", table_name="memory_learning_jobs")
     op.drop_index("ix_memory_learning_jobs_workspace_id", table_name="memory_learning_jobs")
     op.drop_index("ix_memory_learning_jobs_status", table_name="memory_learning_jobs")
