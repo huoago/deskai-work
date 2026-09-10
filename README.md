@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 and Phase 1 are complete. Phase 2 file-system work is implemented and is gated by CI before merge.**
+**Phase 0, Phase 1, and Phase 2 are complete. Phase 3 Parser is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -22,21 +22,24 @@ Implemented foundations:
 - new / changed / deleted / revoked file reconciliation
 - persistent Index Queue and queue status UI
 - manual rescan, watch pause/resume and authorization revoke controls
+- background Parser Worker and local parsed-document cache
+- TXT/MD, CSV, PDF, DOCX, XLSX, PPTX, JPG/PNG parser paths
+- FileVersion rotation and parsed-text/locator preview UI
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-The current chat responder is still a local transport responder. DeskAI does **not** claim document understanding, RAG, OpenAI model responses, memory extraction, or agent execution yet.
+The current chat responder is still a local transport responder. DeskAI can now extract supported local document content, but it does **not** claim RAG, semantic retrieval, OpenAI model responses, memory extraction, or agent execution yet.
 
 ## V1 phase boundaries
 
 The implementation deliberately keeps major capabilities behind verified phase gates:
 
 - **Phase 2 — File system:** Folder authorization, File Picker, Scanner, Watcher, SHA256, Index Queue.
-- **Phase 3 — Parser:** TXT/MD, PDF, DOCX, XLSX, PPTX, CSV, then image parsing.
+- **Phase 3 — Parser:** implemented for TXT/MD, CSV, PDF, DOCX, XLSX, PPTX and JPG/PNG metadata; gated by CI before merge.
 - **Phase 4 — Knowledge base:** Chunks, SQLite FTS5, embeddings, LanceDB, hybrid retrieval, citations.
 - **Phase 5 — AI chat:** model provider and OpenAI Responses API integration.
 - Later phases add durable memory and auditable agent execution.
 
-See `docs/phase2-status.md` for the current file-system implementation.
+See `docs/phase2-status.md` and `docs/phase3-status.md` for the current implementation.
 
 ## Repository layout
 
