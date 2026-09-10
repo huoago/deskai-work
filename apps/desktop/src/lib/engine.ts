@@ -136,12 +136,30 @@ export type Conversation = {
   updated_at: string;
 };
 
+export type MessageCitation = {
+  source_index: number | null;
+  chunk_id: string | null;
+  file_id: string | null;
+  label: string;
+  locator: Record<string, unknown>;
+};
+
 export type ChatMessage = {
   id: string;
   conversation_id: string;
   role: "user" | "assistant" | "system";
   content: string;
   created_at: string;
+  citations: MessageCitation[];
+};
+
+export type OpenAIProviderStatus = {
+  configured: boolean;
+  source: "environment" | "credential_manager" | null;
+  credential_store_available: boolean;
+  writable: boolean;
+  error: string | null;
+  model: string;
 };
 
 export type DesktopSettings = {
@@ -321,10 +339,44 @@ export function updateDesktopSettings(values: Partial<DesktopSettings>): Promise
   });
 }
 
+export function getOpenAIProviderStatus(): Promise<OpenAIProviderStatus> {
+  return request<OpenAIProviderStatus>("/providers/openai/status");
+}
+
+export function saveOpenAIApiKey(apiKey: string): Promise<OpenAIProviderStatus> {
+  return request<OpenAIProviderStatus>("/providers/openai/api-key", {
+    method: "PUT",
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+}
+
+export function deleteOpenAIApiKey(): Promise<OpenAIProviderStatus & { deleted: boolean }> {
+  return request("/providers/openai/api-key", { method: "DELETE" });
+}
+
+export function testOpenAIProvider(): Promise<{ ok: boolean; model: string }> {
+  return request("/providers/openai/test", { method: "POST" });
+}
+
 export type ChatStreamCallbacks = {
-  onMeta?: (payload: { conversation_id: string; user_message_id: string; transport: string }) => void;
+  onMeta?: (payload: {
+    conversation_id: string;
+    user_message_id: string;
+    transport: string;
+    model?: string;
+    privacy_mode?: string;
+    source_count?: number;
+  }) => void;
+  onSources?: (sources: MessageCitation[]) => void;
   onDelta?: (text: string) => void;
-  onDone?: (payload: { assistant_message_id: string }) => void;
+  onDone?: (payload: {
+    assistant_message_id: string;
+    citations?: MessageCitation[];
+    response_id?: string | null;
+    model?: string;
+    input_tokens?: number;
+    output_tokens?: number;
+  }) => void;
 };
 
 export async function streamChat(
@@ -365,9 +417,36 @@ export async function streamChat(
       .join("\n");
     if (!dataText) return;
     const data = JSON.parse(dataText) as Record<string, unknown>;
-    if (event === "meta") callbacks.onMeta?.(data as { conversation_id: string; user_message_id: string; transport: string });
+    if (event === "meta") {
+      callbacks.onMeta?.(data as {
+        conversation_id: string;
+        user_message_id: string;
+        transport: string;
+        model?: string;
+        privacy_mode?: string;
+        source_count?: number;
+      });
+    }
+    if (event === "sources") {
+      const payload = data as { sources?: MessageCitation[] };
+      callbacks.onSources?.(payload.sources ?? []);
+    }
     if (event === "delta") callbacks.onDelta?.(String(data.text ?? ""));
-    if (event === "done") callbacks.onDone?.(data as { assistant_message_id: string });
+    if (event === "done") {
+      callbacks.onDone?.(
+        data as {
+          assistant_message_id: string;
+          citations?: MessageCitation[];
+          response_id?: string | null;
+          model?: string;
+          input_tokens?: number;
+          output_tokens?: number;
+        },
+      );
+    }
+    if (event === "error") {
+      throw new Error(String(data.message ?? "AI response failed"));
+    }
   };
 
   while (true) {
