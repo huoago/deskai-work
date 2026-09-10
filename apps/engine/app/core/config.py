@@ -19,12 +19,16 @@ def default_data_dir() -> Path:
 class Settings:
     data_dir: Path
     session_token: str | None = None
+    watcher_enabled: bool = True
+    watcher_interval_seconds: float = 2.0
 
     @classmethod
     def load(cls, *, session_token: str | None = None) -> "Settings":
         return cls(
             data_dir=default_data_dir(),
             session_token=session_token or os.environ.get("DESKAI_SESSION_TOKEN"),
+            watcher_enabled=os.environ.get("DESKAI_WATCHER_ENABLED", "1") not in {"0", "false", "False"},
+            watcher_interval_seconds=max(float(os.environ.get("DESKAI_WATCHER_INTERVAL", "2.0")), 0.5),
         )
 
     @property
