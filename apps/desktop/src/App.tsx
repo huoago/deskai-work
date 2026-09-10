@@ -4,9 +4,11 @@ import {
   addWorkspaceRoot,
   checkEngine,
   createWorkspace,
+  deleteOpenAIApiKey,
   getDesktopSettings,
   getIndexQueueSummary,
   getKnowledgeStatus,
+  getOpenAIProviderStatus,
   getParsedPreview,
   getParserStatus,
   getWorkspaceWatcherStatus,
@@ -18,9 +20,11 @@ import {
   processKnowledgeQueue,
   processParserQueue,
   revokeWorkspaceRoot,
+  saveOpenAIApiKey,
   scanWorkspace,
   searchKnowledge,
   streamChat,
+  testOpenAIProvider,
   updateDesktopSettings,
   updateWorkspaceRoot,
   type ChatMessage,
@@ -30,6 +34,8 @@ import {
   type IndexedFile,
   type IndexQueueSummary,
   type KnowledgeStatus,
+  type MessageCitation,
+  type OpenAIProviderStatus,
   type ParsedPreview,
   type ParserStatus,
   type SearchHit,
@@ -101,6 +107,9 @@ export default function App() {
 
   const [desktopSettings, setDesktopSettings] = useState<DesktopSettings>(defaultSettings);
   const [settingsDirty, setSettingsDirty] = useState(false);
+  const [providerStatus, setProviderStatus] = useState<OpenAIProviderStatus | null>(null);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [providerAction, setProviderAction] = useState<"save" | "delete" | "test" | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,9 +117,14 @@ export default function App() {
     checkEngine(controller.signal)
       .then(async (connection) => {
         setEngine({ kind: "online", connection });
-        const [items, settings] = await Promise.all([listWorkspaces(), getDesktopSettings()]);
+        const [items, settings, openAIStatus] = await Promise.all([
+          listWorkspaces(),
+          getDesktopSettings(),
+          getOpenAIProviderStatus(),
+        ]);
         setWorkspaces(items);
         setDesktopSettings(settings);
+        setProviderStatus(openAIStatus);
         if (items[0]) {
           setActiveWorkspaceId(items[0].id);
           setPage("chat");
@@ -398,6 +412,55 @@ export default function App() {
     }
   }
 
+  async function onSaveApiKey() {
+    const key = apiKeyDraft.trim();
+    if (!key || providerAction) return;
+    setProviderAction("save");
+    setNotice("");
+    try {
+      const status = await saveOpenAIApiKey(key);
+      setProviderStatus(status);
+      setApiKeyDraft("");
+      setNotice("OpenAI API Key 已保存到 Windows 凭据存储，不会写入 DeskAI 数据库。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "保存 API Key 失败");
+    } finally {
+      setProviderAction(null);
+    }
+  }
+
+  async function onDeleteApiKey() {
+    if (providerAction) return;
+    if (!window.confirm("确定从 Windows 凭据存储中删除 OpenAI API Key 吗？")) return;
+    setProviderAction("delete");
+    setNotice("");
+    try {
+      const status = await deleteOpenAIApiKey();
+      setProviderStatus(status);
+      setApiKeyDraft("");
+      setNotice(status.deleted ? "OpenAI API Key 已从系统凭据存储删除。" : "系统凭据存储中没有可删除的 OpenAI API Key。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除 API Key 失败");
+    } finally {
+      setProviderAction(null);
+    }
+  }
+
+  async function onTestProvider() {
+    if (providerAction) return;
+    setProviderAction("test");
+    setNotice("");
+    try {
+      const result = await testOpenAIProvider();
+      setProviderStatus(await getOpenAIProviderStatus());
+      setNotice(`OpenAI 连接成功，当前模型：${result.model}。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "OpenAI 连接测试失败");
+    } finally {
+      setProviderAction(null);
+    }
+  }
+
   async function onSaveSettings() {
     setBusy(true);
     setNotice("");
@@ -481,6 +544,7 @@ export default function App() {
             streaming={chatStreaming}
             onSend={onSendMessage}
             onNew={onNewConversation}
+            providerConfigured={providerStatus?.configured ?? false}
           />
         ) : page === "workspace" ? (
           <WorkspacePage
@@ -534,6 +598,13 @@ export default function App() {
             dirty={settingsDirty}
             busy={busy}
             onSave={onSaveSettings}
+            providerStatus={providerStatus}
+            apiKeyDraft={apiKeyDraft}
+            setApiKeyDraft={setApiKeyDraft}
+            providerAction={providerAction}
+            onSaveApiKey={onSaveApiKey}
+            onDeleteApiKey={onDeleteApiKey}
+            onTestProvider={onTestProvider}
           />
         )}
 
@@ -558,7 +629,7 @@ function Onboarding({ name, setName, onCreate, disabled }: { name: string; setNa
   );
 }
 
-function ChatPage({ workspace, conversations, activeConversationId, setActiveConversationId, messages, pendingUser, streamingText, input, setInput, streaming, onSend, onNew }: {
+function ChatPage({ workspace, conversations, activeConversationId, setActiveConversationId, messages, pendingUser, streamingText, input, setInput, streaming, onSend, onNew, providerConfigured }: {
   workspace: Workspace | null;
   conversations: Conversation[];
   activeConversationId: string;
@@ -571,6 +642,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
   streaming: boolean;
   onSend: () => void;
   onNew: () => void;
+  providerConfigured: boolean;
 }) {
   return (
     <section className="chat-layout">
@@ -589,17 +661,17 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 3 · 文档解析在线</span>
+          <span className="phase-chip">Phase 5 · AI + 本地资料</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
             <div className="empty-chat">
               <div className="brand-mark large">D</div>
               <h2>开始一个工作对话</h2>
-              <p>当前版本已完成本地文件解析与结构化预览。Chunk、全文/向量检索和引用将在 Phase 4 接入，云模型仍按 Phase 5 接入。</p>
+              <p>{providerConfigured ? "可以直接提问。DeskAI 会先在当前 Workspace 检索相关资料，再由 AI 生成带来源编号的回答。" : "请先到“设置”中配置 OpenAI API Key，然后即可对当前 Workspace 的本地资料进行 AI 问答。"}</p>
             </div>
           )}
-          {messages.map((message) => <MessageBubble key={message.id} role={message.role} content={message.content} />)}
+          {messages.map((message) => <MessageBubble key={message.id} role={message.role} content={message.content} citations={message.citations} />)}
           {pendingUser && <MessageBubble role="user" content={pendingUser} pending />}
           {(streaming || streamingText) && <MessageBubble role="assistant" content={streamingText || "正在建立流式响应…"} pending />}
         </div>
@@ -624,11 +696,23 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
   );
 }
 
-function MessageBubble({ role, content, pending = false }: { role: string; content: string; pending?: boolean }) {
+function MessageBubble({ role, content, citations = [], pending = false }: { role: string; content: string; citations?: MessageCitation[]; pending?: boolean }) {
   return (
     <article className={`message ${role === "user" ? "user" : "assistant"} ${pending ? "pending-message" : ""}`}>
       <div className="message-avatar">{role === "user" ? "你" : "D"}</div>
-      <div><strong>{role === "user" ? "你" : "DeskAI"}</strong><p>{content}</p></div>
+      <div className="message-body">
+        <strong>{role === "user" ? "你" : "DeskAI"}</strong>
+        <p>{content}</p>
+        {!!citations.length && (
+          <div className="message-citations">
+            {citations.map((citation, index) => (
+              <span key={`${citation.chunk_id ?? citation.file_id ?? citation.label}-${index}`}>
+                [{citation.source_index ?? index + 1}] {citation.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </article>
   );
 }
@@ -834,20 +918,82 @@ function SearchPage({ workspace, query, setQuery, results, loading, knowledge, o
   );
 }
 
-function SettingsPage({ values, onChange, dirty, busy, onSave }: { values: DesktopSettings; onChange: (values: DesktopSettings) => void; dirty: boolean; busy: boolean; onSave: () => void }) {
+function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, apiKeyDraft, setApiKeyDraft, providerAction, onSaveApiKey, onDeleteApiKey, onTestProvider }: {
+  values: DesktopSettings;
+  onChange: (values: DesktopSettings) => void;
+  dirty: boolean;
+  busy: boolean;
+  onSave: () => void;
+  providerStatus: OpenAIProviderStatus | null;
+  apiKeyDraft: string;
+  setApiKeyDraft: (value: string) => void;
+  providerAction: "save" | "delete" | "test" | null;
+  onSaveApiKey: () => void;
+  onDeleteApiKey: () => void;
+  onTestProvider: () => void;
+}) {
   return (
     <section className="settings-grid">
       <article className="panel settings-card">
-        <div className="panel-head"><div><h3>AI 与隐私</h3><p className="muted small">这些设置已真实保存到本地 SQLite；模型 Provider 将在 Phase 5 接入。</p></div></div>
+        <div className="panel-head"><div><h3>AI 与隐私</h3><p className="muted small">非敏感设置保存在本地 SQLite；API Key 与这些设置严格分离。</p></div></div>
         <label>隐私模式<select value={values.privacy_mode} onChange={(e) => onChange({ ...values, privacy_mode: e.target.value as DesktopSettings["privacy_mode"] })}><option value="local">Local Only</option><option value="hybrid">Hybrid</option><option value="cloud">Cloud</option></select></label>
         <label>默认模型<input value={values.default_model} onChange={(e) => onChange({ ...values, default_model: e.target.value })} /></label>
         <label>推理级别<select value={values.reasoning_level} onChange={(e) => onChange({ ...values, reasoning_level: e.target.value as DesktopSettings["reasoning_level"] })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
         <label className="toggle-row"><input type="checkbox" checked={values.auto_index} onChange={(e) => onChange({ ...values, auto_index: e.target.checked })} /><span><strong>自动索引入队</strong><small>Watcher 发现目录变化时自动进入 Index Queue；关闭后仍可手动扫描入队</small></span></label>
         <button className="primary save-settings" disabled={!dirty || busy || !values.default_model.trim()} onClick={onSave}>{busy ? "保存中…" : dirty ? "保存设置" : "已保存"}</button>
       </article>
+
+      <article className="panel settings-card provider-card">
+        <div className="panel-head">
+          <div><h3>OpenAI Provider</h3><p className="muted small">密钥不会写入 React、SQLite 或日志；用户输入的 Key 仅交给本地 Engine 保存到 Windows 凭据存储。</p></div>
+          <span className={providerStatus?.configured ? "provider-badge configured" : "provider-badge"}>
+            {providerStatus?.configured ? "已配置" : "未配置"}
+          </span>
+        </div>
+        <div className="provider-summary">
+          <span>当前模型</span><strong>{providerStatus?.model ?? values.default_model}</strong>
+          <span>密钥来源</span><strong>{providerStatus?.source === "environment" ? "环境变量" : providerStatus?.source === "credential_manager" ? "Windows 凭据存储" : "未配置"}</strong>
+        </div>
+        {providerStatus?.source !== "environment" && (
+          <label>OpenAI API Key
+            <input
+              type="password"
+              autoComplete="off"
+              value={apiKeyDraft}
+              onChange={(event) => setApiKeyDraft(event.target.value)}
+              placeholder={providerStatus?.configured ? "输入新 Key 可覆盖当前凭据" : "输入 API Key"}
+              disabled={providerAction !== null || providerStatus?.writable === false}
+            />
+          </label>
+        )}
+        {providerStatus?.error && <p className="provider-error">{providerStatus.error}</p>}
+        <div className="button-row provider-actions">
+          {providerStatus?.source !== "environment" && (
+            <button className="primary" onClick={onSaveApiKey} disabled={!apiKeyDraft.trim() || providerAction !== null || providerStatus?.writable === false}>
+              {providerAction === "save" ? "保存中…" : providerStatus?.configured ? "更新 Key" : "保存 Key"}
+            </button>
+          )}
+          <button className="secondary" onClick={onTestProvider} disabled={!providerStatus?.configured || providerAction !== null}>
+            {providerAction === "test" ? "测试中…" : "测试连接"}
+          </button>
+          {providerStatus?.configured && providerStatus.source !== "environment" && (
+            <button className="text-button danger" onClick={onDeleteApiKey} disabled={providerAction !== null}>
+              {providerAction === "delete" ? "删除中…" : "删除 Key"}
+            </button>
+          )}
+        </div>
+      </article>
+
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 4</span></div>
-        <div className="security-list"><p><b>✓</b> Engine 仅监听 127.0.0.1</p><p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p><p><b>✓</b> Scanner/Watcher/Parser 仅访问授权目录</p><p><b>✓</b> Chunk、FTS5 与 LanceDB 均存放在本机</p><p><b>✓</b> 当前检索不发送资料内容到云端</p></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 5</span></div>
+        <div className="security-list">
+          <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
+          <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
+          <p><b>✓</b> API Key 不进入前端持久化或 SQLite</p>
+          <p><b>✓</b> Hybrid 模式只发送检索命中的必要片段</p>
+          <p><b>✓</b> Responses API 请求显式使用 store=false</p>
+          <p><b>✓</b> Local Only 模式不会调用云模型</p>
+        </div>
       </article>
     </section>
   );
