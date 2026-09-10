@@ -320,7 +320,8 @@ class MemoryService:
             return False
         if len(candidate.subject) > 500 or len(candidate.predicate) > 255:
             return False
-        if len(safe_memory_text(candidate.value)) > 4000:
+        raw_value = json.dumps(candidate.value, ensure_ascii=False, sort_keys=True, default=str)
+        if len(raw_value) > 4000:
             return False
         if is_sensitive_memory(
             subject=candidate.subject,
