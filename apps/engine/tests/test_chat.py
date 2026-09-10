@@ -42,7 +42,6 @@ class FakeOpenAIProvider:
 
     async def stream_response(self, **kwargs):
         self.calls.append(kwargs)
-        answer = "根据当前资料，324地块水表统计总数为4447个。[1]"
         for part in ("根据当前资料，", "324地块水表统计总数为", "4447个。[1]"):
             yield ProviderEvent(type="delta", text=part)
         yield ProviderEvent(
