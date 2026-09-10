@@ -8,10 +8,10 @@ from sqlalchemy import select
 from app.database.models import Chunk, File
 from app.database.session import Database
 from app.knowledge.embedding import EMBEDDING_PROVIDER, embed_text
-
-MIN_VECTOR_SIMILARITY = 0.18
 from app.knowledge.fts import search_fts
 from app.knowledge.vector_store import LanceVectorStore
+
+MIN_VECTOR_SIMILARITY = 0.18
 
 
 @dataclass(slots=True)
