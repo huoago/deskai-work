@@ -1,0 +1,38 @@
+.button-row { display: flex; align-items: center; gap: 8px; }
+.secondary { border: 1px solid #d1d5db; border-radius: 10px; background: white; color: #374151; padding: 10px 14px; font-weight: 700; }
+.secondary:hover:not(:disabled) { background: #f8fafc; border-color: #9ca3af; }
+.root-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; border: 1px solid #eef2f7; border-radius: 11px; padding: 12px; }
+.root-path { min-width: 0; }
+.root-path strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.root-path span { display: block; margin-top: 4px; color: #9ca3af; font-size: 11px; }
+.row-actions { display: flex; gap: 6px; }
+.text-button { border: 0; background: transparent; color: #475569; padding: 7px 8px; border-radius: 8px; font-size: 11px; font-weight: 700; }
+.text-button:hover:not(:disabled) { background: #f1f5f9; }
+.text-button.danger { color: #b91c1c; }
+.text-button.danger:hover:not(:disabled) { background: #fef2f2; }
+.phase2-status { margin-top: 12px; }
+.phase2-status .watcher-error { background: #fff7ed; color: #9a3412; }
+.phase2-status .watcher-error b { color: #ea580c; }
+.mini-summary { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f1f5f9; color: #64748b; font-size: 11px; }
+.files-head { align-items: flex-start; }
+.file-table-head.phase2-table, .file-table-row.phase2-table { grid-template-columns: minmax(220px, 1.4fr) 70px 90px minmax(90px, .7fr) minmax(120px, .8fr); }
+.file-table-row.phase2-table code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #64748b; font-size: 10px; }
+.file-status.revoked { color: #7c3aed; }
+
+@media (max-width: 900px) {
+  .root-row { grid-template-columns: 1fr; }
+  .row-actions { justify-content: flex-start; }
+  .file-table-head.phase2-table, .file-table-row.phase2-table { grid-template-columns: minmax(180px, 1fr) 80px minmax(110px, .8fr); }
+  .file-table-head.phase2-table span:nth-child(2),
+  .file-table-row.phase2-table span:nth-child(2),
+  .file-table-head.phase2-table span:nth-child(3),
+  .file-table-row.phase2-table span:nth-child(3) { display: none; }
+}
+
+@media (max-width: 760px) {
+  .workspace-bar { align-items: flex-start; flex-direction: column; }
+  .button-row { width: 100%; }
+  .button-row .primary, .button-row .secondary { flex: 1; }
+  .file-table-head.phase2-table, .file-table-row.phase2-table { grid-template-columns: minmax(150px, 1fr) minmax(110px, .8fr); }
+  .file-table-head.phase2-table code, .file-table-row.phase2-table code { display: none; }
+}
