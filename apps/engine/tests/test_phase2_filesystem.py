@@ -33,7 +33,7 @@ def test_watcher_run_once_discovers_hashes_and_queues_new_file(client, tmp_path:
     assert files[0]["queue_status"] == "queued"
 
 
-def test_watcher_honors_auto_index_setting(client, tmp_path: Path):
+def test_watcher_honors_auto_index_setting_and_manual_scan_can_queue(client, tmp_path: Path):
     workspace_id = _workspace(client)
     source = tmp_path / "manual-only"
     source.mkdir()
@@ -52,13 +52,13 @@ def test_watcher_honors_auto_index_setting(client, tmp_path: Path):
     files = client.get("/files", params={"workspace_id": workspace_id}).json()
     assert files[0]["status"] == "pending"
     assert files[0]["queue_status"] is None
-    jobs = client.get("/index-jobs", params={"workspace_id": workspace_id}).json()
-    assert jobs == []
+    assert client.get("/index-jobs", params={"workspace_id": workspace_id}).json() == []
 
     manual = client.post(f"/workspaces/{workspace_id}/scan").json()
-    assert manual["summary"]["queued"] == 0
-    # The file is unchanged, so enabling auto-index and scanning again is not
-    # required to prove discovery; manual queueing starts in Phase 3 processing.
+    assert manual["summary"]["queued"] == 1
+    jobs = client.get("/index-jobs", params={"workspace_id": workspace_id}).json()
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "queued"
 
 
 def test_root_watch_toggle_and_revoke_cancel_pending_jobs(client, tmp_path: Path):
