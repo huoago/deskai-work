@@ -99,6 +99,13 @@ def _queue_job(session: Session, workspace_id: str, file_id: str, priority: int 
     )
 
 
+def _queue_pending_if_needed(session: Session, file: File, *, enabled: bool) -> bool:
+    if not enabled or file.status != "pending" or _active_jobs(session, file.id):
+        return False
+    _queue_job(session, file.workspace_id, file.id)
+    return True
+
+
 def _cancel_active_jobs(session: Session, file_id: str, reason: str) -> None:
     for job in _active_jobs(session, file_id):
         job.status = "cancelled"
@@ -252,7 +259,10 @@ def scan_root(
                 and existing.sha256
                 and _same_metadata(existing, stat.st_size, modified_at)
             ):
-                stats.unchanged += 1
+                if _queue_pending_if_needed(session, existing, enabled=queue_changes):
+                    stats.queued += 1
+                else:
+                    stats.unchanged += 1
                 continue
 
             try:
@@ -267,7 +277,10 @@ def scan_root(
             }:
                 existing.size = stat.st_size
                 existing.modified_at = modified_at
-                stats.unchanged += 1
+                if _queue_pending_if_needed(session, existing, enabled=queue_changes):
+                    stats.queued += 1
+                else:
+                    stats.unchanged += 1
                 continue
 
             if existing is None:
