@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.database.models import Chunk, File
+from app.database.models import Chunk
 
 CJK_RE = re.compile(r"[\u3400-\u9fff]+")
 
