@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import func, select
 
-from app.database.models import File, IndexJob
+from app.database.models import File, FileVersion, IndexJob
 
 router = APIRouter(tags=["files"])
 
@@ -24,22 +24,74 @@ def list_files(request: Request, workspace_id: str = Query(...)) -> list[dict]:
             ).all()
             if job.file_id
         }
-        return [
-            {
-                "id": item.id,
-                "workspace_id": item.workspace_id,
-                "path": item.path,
-                "filename": item.filename,
-                "extension": item.extension,
-                "mime_type": item.mime_type,
-                "size": item.size,
-                "sha256": item.sha256,
-                "status": item.status,
-                "modified_at": item.modified_at,
-                "queue_status": active_jobs[item.id].status if item.id in active_jobs else None,
-            }
-            for item in records
-        ]
+        result: list[dict] = []
+        for item in records:
+            version = session.get(FileVersion, item.current_version_id) if item.current_version_id else None
+            result.append(
+                {
+                    "id": item.id,
+                    "workspace_id": item.workspace_id,
+                    "path": item.path,
+                    "filename": item.filename,
+                    "extension": item.extension,
+                    "mime_type": item.mime_type,
+                    "size": item.size,
+                    "sha256": item.sha256,
+                    "status": item.status,
+                    "modified_at": item.modified_at,
+                    "current_version_id": item.current_version_id,
+                    "parser_version": version.parser_version if version else None,
+                    "queue_status": active_jobs[item.id].status if item.id in active_jobs else None,
+                }
+            )
+        return result
+
+
+@router.get("/files/{file_id}/parsed")
+def parsed_file_preview(
+    file_id: str,
+    request: Request,
+    max_chars: int = Query(default=20000, ge=1000, le=100000),
+    max_units: int = Query(default=30, ge=1, le=200),
+) -> dict:
+    with request.app.state.database.session() as session:
+        file = session.get(File, file_id)
+        if file is None:
+            raise HTTPException(status_code=404, detail="File not found")
+        version = session.get(FileVersion, file.current_version_id) if file.current_version_id else None
+        if file.status != "parsed" or version is None:
+            raise HTTPException(status_code=409, detail="File has not completed Phase 3 parsing")
+        payload = request.app.state.parser_worker.cache.read(version.sha256)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Parsed cache is missing")
+
+    text = str(payload.get("text") or "")
+    units = list(payload.get("units") or [])
+    return {
+        "file_id": file_id,
+        "filename": file.filename,
+        "sha256": version.sha256,
+        "parser": payload.get("parser"),
+        "parser_version": payload.get("parser_version"),
+        "file_type": payload.get("file_type"),
+        "title": payload.get("title"),
+        "metadata": payload.get("metadata") or {},
+        "text": text[:max_chars],
+        "text_truncated": len(text) > max_chars,
+        "units": units[:max_units],
+        "units_truncated": len(units) > max_units,
+    }
+
+
+@router.get("/parser/status")
+def parser_status(request: Request) -> dict:
+    return request.app.state.parser_worker.snapshot().as_dict()
+
+
+@router.post("/parser/process")
+def process_parser_queue(request: Request, limit: int = Query(default=20, ge=1, le=100)) -> dict:
+    processed = request.app.state.parser_worker.process_available(limit=limit)
+    return {"processed": processed, "status": request.app.state.parser_worker.snapshot().as_dict()}
 
 
 @router.get("/index-jobs")
