@@ -16,6 +16,7 @@ def client(tmp_path: Path):
             data_dir=tmp_path / "DeskAI",
             watcher_enabled=False,
             parser_worker_enabled=False,
+            knowledge_worker_enabled=False,
         )
     )
     with TestClient(app) as test_client:

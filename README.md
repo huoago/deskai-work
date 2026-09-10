@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0, Phase 1, and Phase 2 are complete. Phase 3 Parser is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 3 are complete. Phase 4 local knowledge retrieval is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -25,9 +25,13 @@ Implemented foundations:
 - background Parser Worker and local parsed-document cache
 - TXT/MD, CSV, PDF, DOCX, XLSX, PPTX, JPG/PNG parser paths
 - FileVersion rotation and parsed-text/locator preview UI
+- structured Chunk generation with source locators
+- SQLite FTS5 keyword retrieval and local LanceDB vector storage
+- current-version-only hybrid retrieval with citation labels
+- desktop local knowledge search page
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-The current chat responder is still a local transport responder. DeskAI can now extract supported local document content, but it does **not** claim RAG, semantic retrieval, OpenAI model responses, memory extraction, or agent execution yet.
+The current chat responder is still a local transport responder. DeskAI can now extract and locally retrieve supported document content with source locators, but it does **not** claim model-generated answers, neural semantic embeddings, memory extraction, or agent execution yet.
 
 ## V1 phase boundaries
 
@@ -35,11 +39,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 
 - **Phase 2 — File system:** Folder authorization, File Picker, Scanner, Watcher, SHA256, Index Queue.
 - **Phase 3 — Parser:** implemented for TXT/MD, CSV, PDF, DOCX, XLSX, PPTX and JPG/PNG metadata; gated by CI before merge.
-- **Phase 4 — Knowledge base:** Chunks, SQLite FTS5, embeddings, LanceDB, hybrid retrieval, citations.
+- **Phase 4 — Knowledge base:** implemented with Chunks, SQLite FTS5, deterministic local vectors, LanceDB, hybrid retrieval, and source citation labels; gated by CI before merge.
 - **Phase 5 — AI chat:** model provider and OpenAI Responses API integration.
 - Later phases add durable memory and auditable agent execution.
 
-See `docs/phase2-status.md` and `docs/phase3-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, and `docs/phase4-status.md` for the current implementation.
 
 ## Repository layout
 

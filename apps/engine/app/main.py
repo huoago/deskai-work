@@ -10,6 +10,7 @@ from app.api.chat import router as chat_router
 from app.api.errors import AppError, app_error_handler
 from app.api.files import router as files_router
 from app.api.health import router as health_router
+from app.api.knowledge import router as knowledge_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
 from app.api.workspaces import router as workspace_router
@@ -17,6 +18,8 @@ from app.core.config import Settings
 from app.database.migrate import run_migrations
 from app.database.session import Database
 from app.indexing.watcher import WorkspaceWatcher
+from app.knowledge.search import HybridSearch
+from app.knowledge.service import KnowledgeIndexer
 from app.parsing.service import ParserWorker
 
 ALLOWED_DESKTOP_ORIGINS = [
@@ -48,20 +51,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             interval_seconds=resolved.parser_worker_interval_seconds,
         )
         app.state.parser_worker = parser_worker
+        knowledge_indexer = KnowledgeIndexer(
+            app.state.database,
+            resolved.data_dir,
+            resolved.vector_path,
+            interval_seconds=resolved.knowledge_worker_interval_seconds,
+        )
+        app.state.knowledge_indexer = knowledge_indexer
+        app.state.hybrid_search = HybridSearch(
+            app.state.database,
+            knowledge_indexer.vector_store,
+        )
         if resolved.watcher_enabled:
             watcher.start()
         if resolved.parser_worker_enabled:
             parser_worker.start()
+        if resolved.knowledge_worker_enabled:
+            knowledge_indexer.start()
         try:
             yield
         finally:
+            knowledge_indexer.stop()
             parser_worker.stop()
             watcher.stop()
             app.state.database.dispose()
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.3.0",
+        version="0.4.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -95,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(workspace_router)
     app.include_router(roots_router)
     app.include_router(files_router)
+    app.include_router(knowledge_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
     return app
