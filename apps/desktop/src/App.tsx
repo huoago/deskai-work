@@ -5,18 +5,25 @@ import {
   checkEngine,
   createWorkspace,
   getDesktopSettings,
+  getIndexQueueSummary,
+  getWorkspaceWatcherStatus,
   listConversations,
   listFiles,
   listMessages,
   listWorkspaceRoots,
   listWorkspaces,
+  revokeWorkspaceRoot,
+  scanWorkspace,
   streamChat,
   updateDesktopSettings,
+  updateWorkspaceRoot,
   type ChatMessage,
   type Conversation,
   type DesktopSettings,
   type EngineConnection,
   type IndexedFile,
+  type IndexQueueSummary,
+  type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
 } from "./lib/engine";
@@ -44,6 +51,15 @@ const defaultSettings: DesktopSettings = {
   auto_index: true,
 };
 
+const emptyQueue: IndexQueueSummary = {
+  queued: 0,
+  processing: 0,
+  completed: 0,
+  failed: 0,
+  cancelled: 0,
+  total: 0,
+};
+
 export default function App() {
   const [engine, setEngine] = useState<EngineState>({ kind: "checking" });
   const [page, setPage] = useState<Page>("workspace");
@@ -51,6 +67,8 @@ export default function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const [roots, setRoots] = useState<WorkspaceRoot[]>([]);
   const [files, setFiles] = useState<IndexedFile[]>([]);
+  const [watcher, setWatcher] = useState<WatcherStatus | null>(null);
+  const [queue, setQueue] = useState<IndexQueueSummary>(emptyQueue);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -95,25 +113,15 @@ export default function App() {
       setRoots([]);
       setFiles([]);
       setConversations([]);
+      setWatcher(null);
+      setQueue(emptyQueue);
       setActiveConversationId("");
       setMessages([]);
       return;
     }
-    Promise.all([
-      listWorkspaceRoots(activeWorkspaceId),
-      listFiles(activeWorkspaceId),
-      listConversations(activeWorkspaceId),
-    ])
-      .then(([nextRoots, nextFiles, nextConversations]) => {
-        setRoots(nextRoots);
-        setFiles(nextFiles);
-        setConversations(nextConversations);
-        setActiveConversationId((current) => {
-          if (current && nextConversations.some((item) => item.id === current)) return current;
-          return nextConversations[0]?.id ?? "";
-        });
-      })
-      .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "加载工作区失败"));
+    refreshWorkspaceData(activeWorkspaceId).catch((error: unknown) =>
+      setNotice(error instanceof Error ? error.message : "加载工作区失败"),
+    );
   }, [activeWorkspaceId]);
 
   useEffect(() => {
@@ -126,9 +134,27 @@ export default function App() {
       .catch((error: unknown) => setNotice(error instanceof Error ? error.message : "加载会话失败"));
   }, [activeConversationId]);
 
+  useEffect(() => {
+    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files"].includes(page)) return;
+    const timer = window.setInterval(() => {
+      Promise.all([
+        listFiles(activeWorkspaceId),
+        getWorkspaceWatcherStatus(activeWorkspaceId),
+        getIndexQueueSummary(activeWorkspaceId),
+      ])
+        .then(([nextFiles, nextWatcher, nextQueue]) => {
+          setFiles(nextFiles);
+          setWatcher(nextWatcher);
+          setQueue(nextQueue);
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeWorkspaceId, engine.kind, page]);
+
   const activeWorkspace = workspaces.find((item) => item.id === activeWorkspaceId) ?? null;
   const counts = useMemo(() => {
-    const result = { pending: 0, indexed: 0, unsupported: 0, deleted: 0, failed: 0 };
+    const result = { pending: 0, indexed: 0, unsupported: 0, deleted: 0, failed: 0, revoked: 0 };
     for (const file of files) {
       if (file.status in result) result[file.status as keyof typeof result] += 1;
     }
@@ -137,14 +163,22 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
+      getWorkspaceWatcherStatus(workspaceId),
+      getIndexQueueSummary(workspaceId),
     ]);
     setRoots(nextRoots);
     setFiles(nextFiles);
     setConversations(nextConversations);
+    setWatcher(nextWatcher);
+    setQueue(nextQueue);
+    setActiveConversationId((current) => {
+      if (current && nextConversations.some((item) => item.id === current)) return current;
+      return nextConversations[0]?.id ?? "";
+    });
   }
 
   async function onCreateWorkspace() {
@@ -176,9 +210,55 @@ export default function App() {
       const result = await addWorkspaceRoot(activeWorkspaceId, selected);
       await refreshWorkspaceData();
       const queued = result.scan?.queued ?? 0;
-      setNotice(`目录已授权并完成首轮扫描，需要索引的文件：${queued} 个。`);
+      setNotice(`目录已授权并完成 SHA256 扫描，进入索引队列：${queued} 个文件。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "授权文件夹失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onScanWorkspace() {
+    if (!activeWorkspaceId) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await scanWorkspace(activeWorkspaceId);
+      await refreshWorkspaceData();
+      setNotice(
+        `扫描完成：发现 ${result.summary.discovered}，入队 ${result.summary.queued}，未变化 ${result.summary.unchanged}，删除 ${result.summary.deleted}。`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "扫描失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onToggleWatch(root: WorkspaceRoot) {
+    if (!activeWorkspaceId) return;
+    setBusy(true);
+    try {
+      await updateWorkspaceRoot(activeWorkspaceId, root.id, { watch_enabled: !root.watch_enabled });
+      await refreshWorkspaceData();
+      setNotice(root.watch_enabled ? "已暂停该目录自动监控。" : "已启用该目录自动监控。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "更新监控状态失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRevokeRoot(root: WorkspaceRoot) {
+    if (!activeWorkspaceId) return;
+    if (!window.confirm("撤销后 DeskAI 将不再读取此目录；不会删除电脑上的任何文件。继续吗？")) return;
+    setBusy(true);
+    try {
+      const result = await revokeWorkspaceRoot(activeWorkspaceId, root.id);
+      await refreshWorkspaceData();
+      setNotice(`已撤销目录授权，${result.revoked_files} 个文件记录已停止索引访问。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "撤销授权失败");
     } finally {
       setBusy(false);
     }
@@ -234,6 +314,7 @@ export default function App() {
       const saved = await updateDesktopSettings(desktopSettings);
       setDesktopSettings(saved);
       setSettingsDirty(false);
+      if (activeWorkspaceId) await refreshWorkspaceData();
       setNotice("设置已保存到本地数据库。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "保存设置失败");
@@ -316,11 +397,23 @@ export default function App() {
             roots={roots}
             files={files}
             counts={counts}
+            watcher={watcher}
+            queue={queue}
             onAddFolder={onAddFolder}
+            onScan={onScanWorkspace}
+            onToggleWatch={onToggleWatch}
+            onRevoke={onRevokeRoot}
             disabled={!online || busy}
           />
         ) : page === "files" ? (
-          <FilesPage files={files} counts={counts} />
+          <FilesPage
+            files={files}
+            counts={counts}
+            queue={queue}
+            watcher={watcher}
+            onScan={onScanWorkspace}
+            disabled={!online || busy}
+          />
         ) : (
           <SettingsPage
             values={desktopSettings}
@@ -386,14 +479,14 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 1 · 本地流式通道</span>
+          <span className="phase-chip">Phase 2 · 文件系统在线</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
             <div className="empty-chat">
               <div className="brand-mark large">D</div>
               <h2>开始一个工作对话</h2>
-              <p>当前版本已实现真实会话持久化和 SSE 流式传输。知识库检索与云模型将在后续阶段接入。</p>
+              <p>当前版本已完成本地会话和文件监控。文档内容解析从 Phase 3 开始，知识库检索与云模型仍按后续阶段接入。</p>
             </div>
           )}
           {messages.map((message) => <MessageBubble key={message.id} role={message.role} content={message.content} />)}
@@ -430,58 +523,83 @@ function MessageBubble({ role, content, pending = false }: { role: string; conte
   );
 }
 
-function WorkspacePage({ workspace, roots, files, counts, onAddFolder, disabled }: {
+function WorkspacePage({ workspace, roots, files, counts, watcher, queue, onAddFolder, onScan, onToggleWatch, onRevoke, disabled }: {
   workspace: Workspace | null;
   roots: WorkspaceRoot[];
   files: IndexedFile[];
   counts: Record<string, number>;
+  watcher: WatcherStatus | null;
+  queue: IndexQueueSummary;
   onAddFolder: () => void;
+  onScan: () => void;
+  onToggleWatch: (root: WorkspaceRoot) => void;
+  onRevoke: (root: WorkspaceRoot) => void;
   disabled: boolean;
 }) {
   return (
     <>
       <section className="workspace-bar">
         <div><span className="eyebrow">当前 Workspace</span><strong>{workspace?.name}</strong></div>
-        <button className="primary" onClick={onAddFolder} disabled={disabled}>+ 授权资料文件夹</button>
+        <div className="button-row">
+          <button className="secondary" onClick={onScan} disabled={disabled}>重新扫描</button>
+          <button className="primary" onClick={onAddFolder} disabled={disabled}>+ 授权资料文件夹</button>
+        </div>
       </section>
       <section className="metric-grid top-metrics">
         <Metric label="授权目录" value={String(roots.length)} />
         <Metric label="发现文件" value={String(files.length)} />
-        <Metric label="待索引" value={String(counts.pending ?? 0)} />
-        <Metric label="不支持/过大" value={String(counts.unsupported ?? 0)} />
+        <Metric label="索引队列" value={String(queue.queued)} />
+        <Metric label="自动监控" value={watcher?.workspace_watching ? "运行中" : "未运行"} />
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>安全边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 安全边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
-              <div className="file-row" key={root.id}>
-                <div><strong>{root.path}</strong><span>只读：{root.read_allowed ? "是" : "否"} · 自动监控：{root.watch_enabled ? "是" : "否"}</span></div>
-                <b>授权</b>
+              <div className="root-row" key={root.id}>
+                <div className="root-path"><strong>{root.path}</strong><span>只读：{root.read_allowed ? "是" : "否"} · Watcher：{root.watch_enabled ? "开启" : "暂停"}</span></div>
+                <div className="row-actions">
+                  <button className="text-button" onClick={() => onToggleWatch(root)} disabled={disabled}>{root.watch_enabled ? "暂停监控" : "开启监控"}</button>
+                  <button className="text-button danger" onClick={() => onRevoke(root)} disabled={disabled}>撤销授权</button>
+                </div>
               </div>
             )) : <p className="muted">尚未授权资料目录。</p>}
           </div>
         </article>
         <article className="panel">
-          <div className="panel-head"><h3>最近发现文件</h3><span>真实 SQLite</span></div>
-          <div className="list-stack files-list">
-            {files.slice(0, 8).map((file) => <FileRow key={file.id} file={file} />)}
-            {!files.length && <p className="muted">授权目录后，Scanner 会计算 SHA256 并写入索引队列。</p>}
+          <div className="panel-head"><h3>文件系统状态</h3><span>{watcher?.cycles ?? 0} 次监控周期</span></div>
+          <div className="security-list phase2-status">
+            <p><b>✓</b> SHA256 Hash 已启用</p>
+            <p><b>✓</b> Scanner 只读取授权目录</p>
+            <p><b>{watcher?.workspace_watching ? "✓" : "·"}</b> Watcher {watcher?.workspace_watching ? "正在监控目录变化" : "当前没有启用的监控目录"}</p>
+            <p><b>✓</b> Index Queue 当前待处理 {queue.queued} 个</p>
+            {watcher?.last_error && <p className="watcher-error"><b>!</b> {watcher.last_error}</p>}
           </div>
+          <div className="mini-summary">待索引 {counts.pending ?? 0} · 不支持 {counts.unsupported ?? 0} · 已删除 {counts.deleted ?? 0} · 已撤权 {counts.revoked ?? 0}</div>
         </article>
       </section>
     </>
   );
 }
 
-function FilesPage({ files, counts }: { files: IndexedFile[]; counts: Record<string, number> }) {
+function FilesPage({ files, counts, queue, watcher, onScan, disabled }: {
+  files: IndexedFile[];
+  counts: Record<string, number>;
+  queue: IndexQueueSummary;
+  watcher: WatcherStatus | null;
+  onScan: () => void;
+  disabled: boolean;
+}) {
   return (
     <section className="panel files-page">
-      <div className="panel-head"><div><h3>工作区文件</h3><p className="muted small">发现 {files.length} 个文件 · 待索引 {counts.pending ?? 0} · 已索引 {counts.indexed ?? 0}</p></div></div>
-      <div className="file-table-head"><span>文件</span><span>类型</span><span>大小</span><span>状态</span></div>
+      <div className="panel-head files-head">
+        <div><h3>工作区文件</h3><p className="muted small">发现 {files.length} · 待索引 {counts.pending ?? 0} · 队列 {queue.queued} · Watcher {watcher?.workspace_watching ? "运行" : "暂停"}</p></div>
+        <button className="secondary" onClick={onScan} disabled={disabled}>立即扫描</button>
+      </div>
+      <div className="file-table-head phase2-table"><span>文件</span><span>类型</span><span>大小</span><span>SHA256</span><span>队列/状态</span></div>
       <div className="list-stack">
         {files.map((file) => <FileRow key={file.id} file={file} table />)}
-        {!files.length && <p className="muted">当前工作区暂无文件。</p>}
+        {!files.length && <p className="muted">当前工作区暂无文件。先在“工作区”授权一个资料文件夹。</p>}
       </div>
     </section>
   );
@@ -489,7 +607,15 @@ function FilesPage({ files, counts }: { files: IndexedFile[]; counts: Record<str
 
 function FileRow({ file, table = false }: { file: IndexedFile; table?: boolean }) {
   if (table) {
-    return <div className="file-table-row"><strong title={file.path}>{file.filename}</strong><span>{file.extension || "—"}</span><span>{formatBytes(file.size)}</span><b className={`file-status ${file.status}`}>{statusLabel(file.status)}</b></div>;
+    return (
+      <div className="file-table-row phase2-table">
+        <strong title={file.path}>{file.filename}</strong>
+        <span>{file.extension || "—"}</span>
+        <span>{formatBytes(file.size)}</span>
+        <code title={file.sha256 ?? ""}>{file.sha256 ? file.sha256.slice(0, 10) : "—"}</code>
+        <b className={`file-status ${file.status}`}>{file.queue_status ? `${queueLabel(file.queue_status)} · ` : ""}{statusLabel(file.status)}</b>
+      </div>
+    );
   }
   return (
     <div className="file-row">
@@ -507,12 +633,12 @@ function SettingsPage({ values, onChange, dirty, busy, onSave }: { values: Deskt
         <label>隐私模式<select value={values.privacy_mode} onChange={(e) => onChange({ ...values, privacy_mode: e.target.value as DesktopSettings["privacy_mode"] })}><option value="local">Local Only</option><option value="hybrid">Hybrid</option><option value="cloud">Cloud</option></select></label>
         <label>默认模型<input value={values.default_model} onChange={(e) => onChange({ ...values, default_model: e.target.value })} /></label>
         <label>推理级别<select value={values.reasoning_level} onChange={(e) => onChange({ ...values, reasoning_level: e.target.value as DesktopSettings["reasoning_level"] })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
-        <label className="toggle-row"><input type="checkbox" checked={values.auto_index} onChange={(e) => onChange({ ...values, auto_index: e.target.checked })} /><span><strong>自动索引</strong><small>授权目录变化时自动进入索引队列</small></span></label>
+        <label className="toggle-row"><input type="checkbox" checked={values.auto_index} onChange={(e) => onChange({ ...values, auto_index: e.target.checked })} /><span><strong>自动索引入队</strong><small>Watcher 发现目录变化时自动进入 Index Queue；关闭后仍可手动扫描入队</small></span></label>
         <button className="primary save-settings" disabled={!dirty || busy || !values.default_model.trim()} onClick={onSave}>{busy ? "保存中…" : dirty ? "保存设置" : "已保存"}</button>
       </article>
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 1</span></div>
-        <div className="security-list"><p><b>✓</b> Engine 仅监听 127.0.0.1</p><p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p><p><b>✓</b> 文件访问限定授权目录</p><p><b>✓</b> API Key 尚未进入 WebView 或 SQLite</p></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 2</span></div>
+        <div className="security-list"><p><b>✓</b> Engine 仅监听 127.0.0.1</p><p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p><p><b>✓</b> Scanner/Watcher 仅访问授权目录</p><p><b>✓</b> 撤销授权不会删除本地文件</p><p><b>✓</b> Parser 尚未启用，文档内容不会在本阶段解析</p></div>
       </article>
     </section>
   );
@@ -525,12 +651,24 @@ function Metric({ label, value }: { label: string; value: string }) {
 function pageTitle(page: Page) {
   if (page === "chat") return "工作对话";
   if (page === "workspace") return "工作区与资料授权";
-  if (page === "files") return "文件";
+  if (page === "files") return "文件与索引队列";
   return "设置";
 }
 
 function statusLabel(status: string) {
-  const labels: Record<string, string> = { pending: "待索引", indexed: "已索引", unsupported: "暂不支持", deleted: "已删除", failed: "失败" };
+  const labels: Record<string, string> = {
+    pending: "待索引",
+    indexed: "已索引",
+    unsupported: "暂不支持",
+    deleted: "已删除",
+    revoked: "已撤权",
+    failed: "失败",
+  };
+  return labels[status] ?? status;
+}
+
+function queueLabel(status: string) {
+  const labels: Record<string, string> = { queued: "已入队", processing: "处理中", completed: "完成", failed: "失败", cancelled: "已取消" };
   return labels[status] ?? status;
 }
 
