@@ -198,3 +198,9 @@ def test_phase4_status_reports_indexed_files_and_chunks(client, tmp_path: Path):
     assert status["index_failed_files"] == 0
     assert status["active_chunks"] >= 1
     assert status["embedding_provider"] == "local-hash-384-v1"
+
+    files = client.get("/files", params={"workspace_id": workspace_id}).json()
+    assert files[0]["status"] == "indexed"
+    preview = client.get(f"/files/{files[0]['id']}/parsed")
+    assert preview.status_code == 200
+    assert "searchable knowledge item" in preview.json()["text"]

@@ -11,9 +11,11 @@ from app.api.errors import AppError, app_error_handler
 from app.api.files import router as files_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
+from app.api.providers import router as providers_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
 from app.api.workspaces import router as workspace_router
+from app.ai.provider import OpenAIChatProvider
 from app.core.config import Settings
 from app.database.migrate import run_migrations
 from app.database.session import Database
@@ -21,6 +23,7 @@ from app.indexing.watcher import WorkspaceWatcher
 from app.knowledge.search import HybridSearch
 from app.knowledge.service import KnowledgeIndexer
 from app.parsing.service import ParserWorker
+from app.security.secrets import SecretStore
 
 ALLOWED_DESKTOP_ORIGINS = [
     "http://127.0.0.1:1420",
@@ -40,6 +43,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         run_migrations(resolved.database_url)
         app.state.database = Database(resolved.database_url, resolved.database_path)
         app.state.session_token = resolved.session_token
+        app.state.secret_store = SecretStore()
+        app.state.openai_provider = OpenAIChatProvider()
         watcher = WorkspaceWatcher(
             app.state.database,
             interval_seconds=resolved.watcher_interval_seconds,
@@ -78,7 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.4.0",
+        version="0.5.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -113,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(roots_router)
     app.include_router(files_router)
     app.include_router(knowledge_router)
+    app.include_router(providers_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
     return app

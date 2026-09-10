@@ -19,6 +19,7 @@ python -m PyInstaller `
   --noconfirm `
   --onefile `
   --name deskai-engine `
+  --collect-submodules "keyring.backends" `
   --add-data "alembic.ini;." `
   --add-data "migrations;migrations" `
   main.py

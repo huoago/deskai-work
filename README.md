@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 3 are complete. Phase 4 local knowledge retrieval is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 4 are complete. Phase 5 grounded AI chat is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -29,9 +29,13 @@ Implemented foundations:
 - SQLite FTS5 keyword retrieval and local LanceDB vector storage
 - current-version-only hybrid retrieval with citation labels
 - desktop local knowledge search page
+- OpenAI Responses API streaming provider
+- Hybrid local-RAG chat with persisted real citations
+- OS-backed API credential storage and provider connection testing
+- Local Only privacy enforcement with no cloud fallback
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-The current chat responder is still a local transport responder. DeskAI can now extract and locally retrieve supported document content with source locators, but it does **not** claim model-generated answers, neural semantic embeddings, memory extraction, or agent execution yet.
+DeskAI can now generate grounded model answers from locally retrieved Workspace context with persisted source citations. It still does **not** claim neural semantic embeddings, autonomous memory extraction, local LLM execution, or agent/tool execution yet.
 
 ## V1 phase boundaries
 
@@ -39,11 +43,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 
 - **Phase 2 — File system:** Folder authorization, File Picker, Scanner, Watcher, SHA256, Index Queue.
 - **Phase 3 — Parser:** implemented for TXT/MD, CSV, PDF, DOCX, XLSX, PPTX and JPG/PNG metadata; gated by CI before merge.
-- **Phase 4 — Knowledge base:** implemented with Chunks, SQLite FTS5, deterministic local vectors, LanceDB, hybrid retrieval, and source citation labels; gated by CI before merge.
-- **Phase 5 — AI chat:** model provider and OpenAI Responses API integration.
+- **Phase 4 — Knowledge base:** complete with Chunks, SQLite FTS5, deterministic local vectors, LanceDB, hybrid retrieval, and source citation labels.
+- **Phase 5 — AI chat:** implemented with secure provider configuration, Responses API streaming, local RAG grounding, conversation history, and persisted citations; gated by CI before merge.
 - Later phases add durable memory and auditable agent execution.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, and `docs/phase4-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, and `docs/phase5-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -102,8 +106,11 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - No local folder is trusted until explicitly stored as a readable Workspace root.
 - Scanner/Watcher access remains within authorized roots and skips symlink escapes.
 - Revoking a folder never deletes the user's local files.
-- React does not receive cloud API secrets.
+- React never receives a saved cloud API secret back from the Engine.
+- User-entered OpenAI credentials use the OS-backed credential store rather than SQLite or repository files.
+- Hybrid mode sends only the user request, bounded conversation history, and locally retrieved relevant snippets to the cloud model.
+- Responses requests use `store=false`; DeskAI keeps conversation state locally.
+- Retrieved document content is treated as untrusted data, never as system instructions.
 - Destructive file actions are not part of the current phase.
-- Future document content will be treated as untrusted data, never as system instructions.
 
-See `docs/security.md`, `docs/phase0-status.md`, and `docs/phase2-status.md`.
+See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.
