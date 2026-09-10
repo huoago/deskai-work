@@ -79,6 +79,35 @@ export type ParserStatus = {
   parser_version: string;
 };
 
+export type KnowledgeStatus = {
+  running: boolean;
+  processed: number;
+  failed: number;
+  last_file_id: string | null;
+  last_completed_at: string | null;
+  last_error: string | null;
+  embedding_provider: string;
+  workspace_id: string | null;
+  parsed_files: number;
+  indexed_files: number;
+  index_failed_files: number;
+  active_chunks: number;
+};
+
+export type SearchHit = {
+  chunk_id: string;
+  file_id: string;
+  filename: string;
+  score: number;
+  content: string;
+  snippet: string;
+  locator: Record<string, unknown>;
+  citation_label: string;
+  lexical_rank: number | null;
+  vector_rank: number | null;
+  embedding_provider: string;
+};
+
 export type ParsedPreview = {
   file_id: string;
   filename: string;
@@ -243,6 +272,27 @@ export function processParserQueue(limit = 20): Promise<{ processed: number; sta
 export function getParsedPreview(fileId: string): Promise<ParsedPreview> {
   return request<ParsedPreview>(`/files/${fileId}/parsed`);
 }
+
+export function getKnowledgeStatus(workspaceId?: string): Promise<KnowledgeStatus> {
+  const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return request<KnowledgeStatus>(`/knowledge/status${suffix}`);
+}
+
+export function processKnowledgeQueue(limit = 20): Promise<{ processed: number; status: KnowledgeStatus }> {
+  return request(`/knowledge/process?limit=${encodeURIComponent(String(limit))}`, { method: "POST" });
+}
+
+export function searchKnowledge(
+  workspaceId: string,
+  query: string,
+  limit = 8,
+): Promise<{ workspace_id: string; query: string; count: number; results: SearchHit[] }> {
+  return request("/search", {
+    method: "POST",
+    body: JSON.stringify({ workspace_id: workspaceId, query, limit }),
+  });
+}
+
 
 export function listConversations(workspaceId?: string): Promise<Conversation[]> {
   const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
