@@ -11,6 +11,12 @@ from app.main import create_app
 
 @pytest.fixture()
 def client(tmp_path: Path):
-    app = create_app(Settings(data_dir=tmp_path / "DeskAI", watcher_enabled=False))
+    app = create_app(
+        Settings(
+            data_dir=tmp_path / "DeskAI",
+            watcher_enabled=False,
+            parser_worker_enabled=False,
+        )
+    )
     with TestClient(app) as test_client:
         yield test_client

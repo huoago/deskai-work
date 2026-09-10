@@ -21,6 +21,8 @@ class Settings:
     session_token: str | None = None
     watcher_enabled: bool = True
     watcher_interval_seconds: float = 2.0
+    parser_worker_enabled: bool = True
+    parser_worker_interval_seconds: float = 0.75
 
     @classmethod
     def load(cls, *, session_token: str | None = None) -> "Settings":
@@ -29,6 +31,11 @@ class Settings:
             session_token=session_token or os.environ.get("DESKAI_SESSION_TOKEN"),
             watcher_enabled=os.environ.get("DESKAI_WATCHER_ENABLED", "1") not in {"0", "false", "False"},
             watcher_interval_seconds=max(float(os.environ.get("DESKAI_WATCHER_INTERVAL", "2.0")), 0.5),
+            parser_worker_enabled=os.environ.get("DESKAI_PARSER_WORKER_ENABLED", "1")
+            not in {"0", "false", "False"},
+            parser_worker_interval_seconds=max(
+                float(os.environ.get("DESKAI_PARSER_WORKER_INTERVAL", "0.75")), 0.25
+            ),
         )
 
     @property

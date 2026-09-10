@@ -277,7 +277,11 @@ def scan_root(
             }:
                 existing.size = stat.st_size
                 existing.modified_at = modified_at
-                if _queue_pending_if_needed(session, existing, enabled=queue_changes):
+                if existing.status == "failed" and queue_changes and not metadata_shortcut:
+                    existing.status = "pending"
+                    _queue_job(session, existing.workspace_id, existing.id)
+                    stats.queued += 1
+                elif _queue_pending_if_needed(session, existing, enabled=queue_changes):
                     stats.queued += 1
                 else:
                     stats.unchanged += 1

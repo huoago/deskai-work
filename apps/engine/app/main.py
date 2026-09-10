@@ -17,6 +17,7 @@ from app.core.config import Settings
 from app.database.migrate import run_migrations
 from app.database.session import Database
 from app.indexing.watcher import WorkspaceWatcher
+from app.parsing.service import ParserWorker
 
 ALLOWED_DESKTOP_ORIGINS = [
     "http://127.0.0.1:1420",
@@ -41,17 +42,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             interval_seconds=resolved.watcher_interval_seconds,
         )
         app.state.workspace_watcher = watcher
+        parser_worker = ParserWorker(
+            app.state.database,
+            resolved.data_dir,
+            interval_seconds=resolved.parser_worker_interval_seconds,
+        )
+        app.state.parser_worker = parser_worker
         if resolved.watcher_enabled:
             watcher.start()
+        if resolved.parser_worker_enabled:
+            parser_worker.start()
         try:
             yield
         finally:
+            parser_worker.stop()
             watcher.stop()
             app.state.database.dispose()
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.2.0",
+        version="0.3.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,

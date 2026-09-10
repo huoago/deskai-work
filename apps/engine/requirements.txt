@@ -4,3 +4,8 @@ pydantic==2.13.4
 pydantic-settings==2.14.1
 SQLAlchemy==2.0.52
 alembic==1.19.2
+PyMuPDF>=1.26,<2
+python-docx>=1.2,<2
+openpyxl>=3.1,<4
+python-pptx>=1.0,<2
+Pillow>=11,<13
