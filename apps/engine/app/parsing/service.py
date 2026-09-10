@@ -55,6 +55,7 @@ class ParserWorker:
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._process_lock = threading.Lock()
         self._processed = 0
         self._failed = 0
         self._last_file_id: str | None = None
@@ -104,85 +105,100 @@ class ParserWorker:
         return count
 
     def process_next(self) -> bool:
-        claim = self._claim_next()
-        if claim is None:
-            return False
+        # The desktop can request an immediate parse while the background worker
+        # is active. Serialize claims so the same queued SQLite job is never parsed twice.
+        with self._process_lock:
+            claim = self._claim_next()
+            if claim is None:
+                return False
 
-        job_id, file_id, path, expected_sha = claim
-        try:
-            parsed = parse_document(path)
-            actual_sha = sha256_file(path)
-            if actual_sha != expected_sha:
-                self._mark_stale(job_id, file_id)
-                return True
+            job_id, file_id, path, expected_sha = claim
+            try:
+                parsed = parse_document(path)
+                actual_sha = sha256_file(path)
+                if actual_sha != expected_sha:
+                    self._mark_stale(job_id, file_id)
+                    return True
 
-            payload = parsed.as_dict()
-            payload.update(
-                {
-                    "file_id": file_id,
-                    "sha256": expected_sha,
-                    "source_path": str(path),
-                    "parsed_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-            cache_path = self.cache.write(expected_sha, payload)
-            self._complete(job_id, file_id, expected_sha, cache_path)
-            self._record_success(file_id)
-        except Exception as exc:
-            self._fail(job_id, file_id, exc)
-            self._record_failure(file_id, exc)
-        return True
+                payload = parsed.as_dict()
+                payload.update(
+                    {
+                        "file_id": file_id,
+                        "sha256": expected_sha,
+                        "source_path": str(path),
+                        "parsed_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                cache_path = self.cache.write(expected_sha, payload)
+                if self._complete(job_id, file_id, expected_sha, cache_path):
+                    self._record_success(file_id)
+            except Exception as exc:
+                self._fail(job_id, file_id, exc)
+                self._record_failure(file_id, exc)
+            return True
 
     def _claim_next(self) -> tuple[str, str, Path, str] | None:
         with self.database.session() as session:
-            job = session.scalar(
-                select(IndexJob)
-                .where(IndexJob.status == "queued")
-                .order_by(IndexJob.priority, IndexJob.created_at)
-                .limit(1)
-            )
-            if job is None or job.file_id is None:
-                return None
-
-            file = session.get(File, job.file_id)
-            if file is None:
-                job.status = "cancelled"
-                job.error_code = "FILE_MISSING"
-                job.error_message = "File record no longer exists"
-                return None
-
-            if file.status in BLOCKED_FILE_STATUSES or not file.sha256:
-                job.status = "cancelled"
-                job.error_code = "FILE_NOT_PARSEABLE"
-                job.error_message = f"File status is {file.status}"
-                return None
-
-            try:
-                path = Path(file.path).expanduser().resolve(strict=True)
-            except OSError as exc:
-                job.status = "failed"
-                job.error_code = "FILE_UNAVAILABLE"
-                job.error_message = str(exc)
-                file.status = "failed"
-                return True and None
-
-            roots = session.scalars(
-                select(WorkspaceRoot).where(
-                    WorkspaceRoot.workspace_id == file.workspace_id,
-                    WorkspaceRoot.read_allowed.is_(True),
+            while True:
+                job = session.scalar(
+                    select(IndexJob)
+                    .where(IndexJob.status == "queued")
+                    .order_by(IndexJob.priority, IndexJob.created_at)
+                    .limit(1)
                 )
-            ).all()
-            if not any(_safe_is_within(path, root.path) for root in roots):
-                job.status = "cancelled"
-                job.error_code = "AUTHORIZATION_REVOKED"
-                job.error_message = "File is outside readable workspace roots"
-                file.status = "revoked"
-                return None
+                if job is None:
+                    return None
 
-            job.status = "processing"
-            job.error_code = None
-            job.error_message = None
-            return job.id, file.id, path, file.sha256
+                if job.file_id is None:
+                    job.status = "cancelled"
+                    job.error_code = "FILE_MISSING"
+                    job.error_message = "Index job has no file reference"
+                    session.flush()
+                    continue
+
+                file = session.get(File, job.file_id)
+                if file is None:
+                    job.status = "cancelled"
+                    job.error_code = "FILE_MISSING"
+                    job.error_message = "File record no longer exists"
+                    session.flush()
+                    continue
+
+                if file.status in BLOCKED_FILE_STATUSES or not file.sha256:
+                    job.status = "cancelled"
+                    job.error_code = "FILE_NOT_PARSEABLE"
+                    job.error_message = f"File status is {file.status}"
+                    session.flush()
+                    continue
+
+                try:
+                    path = Path(file.path).expanduser().resolve(strict=True)
+                except OSError as exc:
+                    job.status = "failed"
+                    job.error_code = "FILE_UNAVAILABLE"
+                    job.error_message = str(exc)
+                    file.status = "failed"
+                    session.flush()
+                    continue
+
+                roots = session.scalars(
+                    select(WorkspaceRoot).where(
+                        WorkspaceRoot.workspace_id == file.workspace_id,
+                        WorkspaceRoot.read_allowed.is_(True),
+                    )
+                ).all()
+                if not any(_safe_is_within(path, root.path) for root in roots):
+                    job.status = "cancelled"
+                    job.error_code = "AUTHORIZATION_REVOKED"
+                    job.error_message = "File is outside readable workspace roots"
+                    file.status = "revoked"
+                    session.flush()
+                    continue
+
+                job.status = "processing"
+                job.error_code = None
+                job.error_message = None
+                return job.id, file.id, path, file.sha256
 
     def _mark_stale(self, job_id: str, file_id: str) -> None:
         with self.database.session() as session:
@@ -196,22 +212,25 @@ class ParserWorker:
                 file.status = "pending"
                 self._ensure_queued(session, file)
 
-    def _complete(self, job_id: str, file_id: str, sha256: str, cache_path: Path) -> None:
+    def _complete(self, job_id: str, file_id: str, sha256: str, cache_path: Path) -> bool:
         with self.database.session() as session:
             job = session.get(IndexJob, job_id)
             file = session.get(File, file_id)
             if job is None or file is None:
-                return
+                return False
             if file.sha256 != sha256 or file.status in BLOCKED_FILE_STATUSES:
                 job.status = "cancelled"
                 job.error_code = "STALE_PARSE_RESULT"
                 job.error_message = "Parsed result no longer matches the current file"
                 if file.status not in BLOCKED_FILE_STATUSES:
                     self._ensure_queued(session, file)
-                return
+                return False
 
             for version in session.scalars(
-                select(FileVersion).where(FileVersion.file_id == file_id, FileVersion.active.is_(True))
+                select(FileVersion).where(
+                    FileVersion.file_id == file_id,
+                    FileVersion.active.is_(True),
+                )
             ).all():
                 version.active = False
 
@@ -243,6 +262,7 @@ class ParserWorker:
             job.status = "completed"
             job.error_code = None
             job.error_message = f"Parsed cache: {cache_path.name}"
+            return True
 
     def _fail(self, job_id: str, file_id: str, exc: Exception) -> None:
         with self.database.session() as session:
@@ -250,7 +270,9 @@ class ParserWorker:
             file = session.get(File, file_id)
             if job is not None:
                 job.status = "failed"
-                job.error_code = "PARSE_ERROR" if isinstance(exc, ParseError) else "PARSER_INTERNAL_ERROR"
+                job.error_code = (
+                    "PARSE_ERROR" if isinstance(exc, ParseError) else "PARSER_INTERNAL_ERROR"
+                )
                 job.error_message = str(exc)[:4000]
             if file is not None and file.status not in BLOCKED_FILE_STATUSES:
                 file.status = "failed"
@@ -280,7 +302,12 @@ class ParserWorker:
             self._last_error = None
 
     def _record_failure(self, file_id: str, exc: Exception) -> None:
-        logger.exception("Parser worker failed for %s", file_id, exc_info=exc)
+        logger.error(
+            "Parser worker failed for %s: %s",
+            file_id,
+            exc,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         with self._lock:
             self._failed += 1
             self._last_file_id = file_id
