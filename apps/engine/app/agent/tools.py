@@ -39,6 +39,7 @@ class ToolRegistry:
         analysis_service,
         web_research_service,
         source_edit_service,
+        source_edit_batch_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
@@ -48,6 +49,7 @@ class ToolRegistry:
         self.analysis_service = analysis_service
         self.web_research_service = web_research_service
         self.source_edit_service = source_edit_service
+        self.source_edit_batch_service = source_edit_batch_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -66,6 +68,7 @@ class ToolRegistry:
             "aggregate_table": self._aggregate_table,
             "search_web": self._search_web,
             "propose_source_file_edit": self._propose_source_file_edit,
+            "propose_source_file_edit_batch": self._propose_source_file_edit_batch,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -450,6 +453,22 @@ class ToolRegistry:
             cell_edits=cell_edits,
         )
 
+    def _propose_source_file_edit_batch(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        edits = arguments.get("edits") or []
+        if not isinstance(edits, list):
+            raise ValueError("edits must be a list")
+        return self.source_edit_batch_service.propose(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            summary=str(arguments.get("summary") or ""),
+            edits=edits,
+        )
+
     def _aggregate_table(
         self,
         _task_id: str,
@@ -761,6 +780,102 @@ def _tool_specs() -> list[ToolSpec]:
                     "replacements",
                     "cell_edits",
                 ],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="propose_source_file_edit_batch",
+            description=(
+                "Create one transactional staged proposal spanning 2-10 existing "
+                "TXT/MD/DOCX/XLSX files in the active Workspace. This tool NEVER writes "
+                "source files. Every member requires write_allowed=true and the whole "
+                "batch must be confirmed once in the desktop UI. Confirmation uses "
+                "all-or-nothing preflight, backups, SHA checks, and automatic rollback."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
+                    "edits": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file_id": {"type": "string", "minLength": 1},
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["text_replace", "docx_replace", "xlsx_cells"],
+                                },
+                                "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 1000,
+                                },
+                                "replacements": {
+                                    "type": "array",
+                                    "maxItems": 20,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "find": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 10000,
+                                            },
+                                            "replace": {
+                                                "type": "string",
+                                                "maxLength": 20000,
+                                            },
+                                            "replace_all": {"type": "boolean"},
+                                        },
+                                        "required": ["find", "replace", "replace_all"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                                "cell_edits": {
+                                    "type": "array",
+                                    "maxItems": 100,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "sheet": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 255,
+                                            },
+                                            "cell": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 16,
+                                            },
+                                            "value_type": {
+                                                "type": "string",
+                                                "enum": ["text", "number", "boolean", "blank"],
+                                            },
+                                            "value": {
+                                                "type": "string",
+                                                "maxLength": 10000,
+                                            },
+                                        },
+                                        "required": ["sheet", "cell", "value_type", "value"],
+                                        "additionalProperties": False,
+                                    },
+                                },
+                            },
+                            "required": [
+                                "file_id",
+                                "mode",
+                                "summary",
+                                "replacements",
+                                "cell_edits",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["summary", "edits"],
                 "additionalProperties": False,
             },
         ),
