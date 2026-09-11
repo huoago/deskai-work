@@ -139,6 +139,7 @@ class SourceFileEditService:
             raise ValueError("Source file changed after the proposal; confirmation is blocked")
         if not candidate.is_file() or sha256_file(candidate) != snapshot["candidate_sha256"]:
             raise ValueError("Staged edit candidate is missing or corrupted")
+        self.probe_source_available(source)
 
         backup.parent.mkdir(parents=True, exist_ok=True)
         if backup.exists():
@@ -229,6 +230,7 @@ class SourceFileEditService:
             raise ValueError("Original backup is missing or corrupted")
         if not candidate.is_file() or sha256_file(candidate) != snapshot["candidate_sha256"]:
             raise ValueError("Applied candidate copy is missing or corrupted")
+        self.probe_source_available(source)
 
         self._atomic_replace(backup, source)
         restored_sha = sha256_file(source)
