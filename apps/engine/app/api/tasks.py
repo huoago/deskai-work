@@ -139,6 +139,10 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
         task_id=task_id,
         limit=100,
     )
+    payload["recycle_batches"] = request.app.state.file_recycle_batch_service.list(
+        task_id=task_id,
+        limit=100,
+    )
     return payload
 
 
