@@ -1,1 +1,3 @@
-from app.analysis.service import DataAnalysisService\n\n__all__ = ["DataAnalysisService"]\n
+from app.analysis.service import DataAnalysisService
+
+__all__ = ["DataAnalysisService"]
