@@ -170,6 +170,8 @@ def reconcile_workspace_access(session: Session, workspace_id: str) -> int:
     revoked = 0
     records = session.scalars(select(File).where(File.workspace_id == workspace_id)).all()
     for record in records:
+        if record.status == "recycled":
+            continue
         try:
             path = Path(record.path).resolve(strict=False)
         except OSError:
