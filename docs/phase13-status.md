@@ -1,6 +1,6 @@
 # Phase 13 — Controlled file organization
 
-Status: implemented on the Phase 13 branch and pending full CI verification.
+Status: complete, verified by full CI, and merged to `main`.
 
 ## Objective
 
@@ -108,14 +108,27 @@ Phase 13 tests cover:
 - interrupted apply is completed by startup recovery;
 - Agent can only create a pending proposal.
 
-Required CI gates:
+### Merge verification
 
-- Ruff;
-- full Engine Pytest suite;
-- TypeScript typecheck;
-- Vite production build;
-- Windows PyInstaller sidecar;
-- packaged Engine 0.13.0 smoke;
-- packaged `/file-operations` API smoke;
-- Tauri NSIS/MSI;
-- Windows Artifact upload.
+Feature PR #18 passed the complete CI pipeline on Run #68 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **81 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.13.0** health smoke — passed;
+- packaged `/file-operations` API smoke — passed;
+- Tauri Windows NSIS/MSI build — passed;
+- Windows Artifact upload — passed.
+
+Feature PR #18 was squash merged to `main` as commit:
+
+`55de643b0a8681e2ff3c07a78fef4029c06310e2`
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10276531241`;
+- size: `394223506` bytes;
+- SHA-256: `54693384f81dc914f2d6af33cd7637f388da84dbbf24a9d3da76be9497d4908a`.
