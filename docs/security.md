@@ -84,3 +84,16 @@ The local absolute artifact path is not included in model-visible tool output. I
 Artifact creation is atomic at the application level: if database registry persistence fails after file creation, the new file is deleted.
 
 Source-document edit, overwrite, delete, arbitrary destination writes, shell execution, and unrestricted Python remain unavailable.
+
+
+## Controlled computation boundary
+
+Phase 9 does not expose general Python execution.
+
+The local calculation tool parses a single expression with Python AST and validates every node against a numeric-only allow-list before evaluation. Imports, attributes, subscripts, comprehensions, lambdas, statements, file access, process APIs, networking, and environment access are unavailable.
+
+Expression size, AST complexity, numeric constants, and exponent magnitude are bounded before evaluation.
+
+Tabular tools never receive a local path. They receive a DeskAI File id, validate that the File belongs to the active Workspace, require a current parsed/indexed FileVersion, restrict file types to CSV/XLSX, and read only the local parsed-document cache.
+
+Phase 9 therefore does not weaken the existing Workspace filesystem authorization model and must not be treated as permission to run arbitrary code.

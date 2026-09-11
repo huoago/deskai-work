@@ -900,7 +900,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 8 · AI + 记忆 + 安全产物 Agent</span>
+          <span className="phase-chip">Phase 9 · AI + 记忆 + 安全产物 + 数据分析</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1370,7 +1370,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
           className="task-request"
           value={request}
           onChange={(event) => setRequest(event.target.value)}
-          placeholder="例如：查阅当前项目资料和长期记忆，整理324水表数量、来源及待确认问题，并生成一份Word总结和Excel统计表。"
+          placeholder="例如：分析当前项目的CSV/XLSX统计表，核对数量与分组汇总，并生成一份Word结论和Excel结果表。"
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onCreate();
           }}
@@ -1596,7 +1596,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 8</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 9</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1608,6 +1608,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
           <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
           <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
+          <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件、网络或系统命令</p>
         </div>
       </article>
     </section>

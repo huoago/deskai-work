@@ -36,12 +36,14 @@ class ToolRegistry:
         memory_service,
         parser_cache,
         artifact_service,
+        analysis_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
         self.memory_service = memory_service
         self.parser_cache = parser_cache
         self.artifact_service = artifact_service
+        self.analysis_service = analysis_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -54,6 +56,10 @@ class ToolRegistry:
             "read_parsed_document": self._read_parsed_document,
             "create_word_document": self._create_word_document,
             "create_spreadsheet": self._create_spreadsheet,
+            "calculate_expression": self._calculate_expression,
+            "inspect_table": self._inspect_table,
+            "summarize_table": self._summarize_table,
+            "aggregate_table": self._aggregate_table,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -352,6 +358,79 @@ class ToolRegistry:
         return _artifact_payload(artifact)
 
 
+    def _calculate_expression(
+        self,
+        _task_id: str,
+        _workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_variables = arguments.get("variables") or []
+        if not isinstance(raw_variables, list):
+            raise ValueError("variables must be a list")
+        variables: dict[str, float] = {}
+        for item in raw_variables[:50]:
+            if not isinstance(item, dict):
+                raise ValueError("Each variable must be an object")
+            variables[str(item.get("name") or "")] = float(item.get("value"))
+        return self.analysis_service.calculate(
+            str(arguments.get("expression") or ""),
+            variables,
+        )
+
+    def _inspect_table(
+        self,
+        _task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.analysis_service.inspect_table(
+            workspace_id=workspace_id,
+            file_id=str(arguments.get("file_id") or ""),
+            sheet=_optional_string(arguments.get("sheet")),
+            header_row=_bounded_int(arguments.get("header_row"), default=1, minimum=1, maximum=20),
+            max_rows=_bounded_int(arguments.get("max_rows"), default=10, minimum=1, maximum=50),
+        )
+
+    def _summarize_table(
+        self,
+        _task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        columns = arguments.get("columns") or []
+        if not isinstance(columns, list):
+            raise ValueError("columns must be a list")
+        return self.analysis_service.summarize_table(
+            workspace_id=workspace_id,
+            file_id=str(arguments.get("file_id") or ""),
+            sheet=_optional_string(arguments.get("sheet")),
+            header_row=_bounded_int(arguments.get("header_row"), default=1, minimum=1, maximum=20),
+            columns=[str(item) for item in columns[:20]],
+        )
+
+    def _aggregate_table(
+        self,
+        _task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.analysis_service.aggregate_table(
+            workspace_id=workspace_id,
+            file_id=str(arguments.get("file_id") or ""),
+            sheet=_optional_string(arguments.get("sheet")),
+            header_row=_bounded_int(arguments.get("header_row"), default=1, minimum=1, maximum=20),
+            group_by=str(arguments.get("group_by") or ""),
+            value_column=str(arguments.get("value_column") or ""),
+            operation=str(arguments.get("operation") or ""),
+            limit=_bounded_int(arguments.get("limit"), default=20, minimum=1, maximum=100),
+        )
+
+
+def _optional_string(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 def _artifact_payload(artifact) -> dict[str, Any]:
     return {
         "artifact_id": artifact.id,
@@ -504,6 +583,83 @@ def _tool_specs() -> list[ToolSpec]:
                     },
                 },
                 "required": ["filename", "sheets"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="calculate_expression",
+            description="Evaluate one bounded numeric expression locally. Supports arithmetic and approved numeric functions only; no imports, attributes, filesystem, network, subprocesses, or arbitrary Python statements.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "expression": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "variables": {
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "minLength": 1, "maxLength": 64},
+                                "value": {"type": "number"},
+                            },
+                            "required": ["name", "value"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["expression", "variables"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="inspect_table",
+            description="Inspect headers and a bounded row preview from a parsed CSV/XLSX file in the active Workspace. Uses parsed cache only.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "minLength": 1},
+                    "sheet": {"type": "string", "maxLength": 255},
+                    "header_row": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "max_rows": {"type": "integer", "minimum": 1, "maximum": 50},
+                },
+                "required": ["file_id", "sheet", "header_row", "max_rows"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="summarize_table",
+            description="Compute deterministic column counts and numeric min/max/sum/mean/median from a parsed CSV/XLSX file in the active Workspace.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "minLength": 1},
+                    "sheet": {"type": "string", "maxLength": 255},
+                    "header_row": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "columns": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "items": {"type": "string"},
+                    },
+                },
+                "required": ["file_id", "sheet", "header_row", "columns"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="aggregate_table",
+            description="Group a parsed CSV/XLSX table by one column and compute count/sum/mean/min/max over another column. Read-only and deterministic.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "minLength": 1},
+                    "sheet": {"type": "string", "maxLength": 255},
+                    "header_row": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "group_by": {"type": "string", "minLength": 1},
+                    "value_column": {"type": "string", "minLength": 1},
+                    "operation": {"type": "string", "enum": ["count", "sum", "mean", "min", "max"]},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                },
+                "required": ["file_id", "sheet", "header_row", "group_by", "value_column", "operation", "limit"],
                 "additionalProperties": False,
             },
         ),

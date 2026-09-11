@@ -24,6 +24,7 @@ from app.agent.orchestrator import AgentOrchestrator
 from app.agent.tools import ToolRegistry
 from app.agent.worker import AgentWorker
 from app.ai.provider import OpenAIChatProvider
+from app.analysis.service import DataAnalysisService
 from app.artifacts.service import ArtifactService
 from app.core.config import Settings
 from app.database.migrate import run_migrations
@@ -90,12 +91,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.memory_worker = memory_worker
         artifact_service = ArtifactService(app.state.database, resolved.data_dir)
         app.state.artifact_service = artifact_service
+        analysis_service = DataAnalysisService(app.state.database, parser_worker.cache)
+        app.state.analysis_service = analysis_service
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
             memory_service,
             parser_worker.cache,
             artifact_service,
+            analysis_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(

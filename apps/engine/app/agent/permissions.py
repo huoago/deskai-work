@@ -15,6 +15,10 @@ AGENT_TOOL_POLICY: dict[str, tuple[int, bool]] = {
     "read_parsed_document": (2, False),
     "create_word_document": (3, False),
     "create_spreadsheet": (3, False),
+    "calculate_expression": (1, False),
+    "inspect_table": (1, False),
+    "summarize_table": (1, False),
+    "aggregate_table": (1, False),
 }
 
 

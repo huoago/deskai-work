@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 7 are complete. Phase 8 sandboxed Word/Excel artifact generation is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 8 are complete. Phase 9 controlled local calculation and CSV/XLSX analysis is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -48,9 +48,12 @@ Implemented foundations:
 - Agent-created XLSX via openpyxl with formula-injection neutralization
 - non-overwriting per-Task generated output directories
 - desktop generated-artifact cards with local path, size and SHA-256
+- bounded numeric expression evaluator with AST allow-list
+- deterministic CSV/XLSX preview, summary statistics and grouped aggregation
+- Workspace-scoped parsed-cache analysis without arbitrary Python execution
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, and create new Word/Excel work artifacts inside a private per-Task sandbox. It still does **not** claim neural semantic embeddings, local LLM execution, source-file overwrite/edit, arbitrary shell execution, or GUI/browser control yet.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, and perform deterministic local calculations and CSV/XLSX analysis. It still does **not** claim neural semantic embeddings, local LLM execution, source-file overwrite/edit, arbitrary Python/shell execution, or GUI/browser control yet.
 
 ## V1 phase boundaries
 
@@ -62,10 +65,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 5 — AI chat:** complete with secure provider configuration, Responses API streaming, local RAG grounding, conversation history, and persisted citations.
 - **Phase 6 — Durable memory:** complete with persistent learning jobs, Structured Output extraction, sensitivity gates, correction/version history, retrieval injection, and Memory UI.
 - **Phase 7 — Agent execution:** complete with persistent Tasks, restart recovery, Responses function calling, a read-only Tool Registry, Permission Gate, ToolCall/AuditLog persistence, and Tasks/Activity UI.
-- **Phase 8 — Safe artifacts:** implemented with a generated-artifact registry, sandboxed DOCX/XLSX creation, path traversal protection, no-overwrite semantics, spreadsheet formula-injection neutralization, and artifact UI; gated by CI before merge.
-- Later phases add sandboxed Python/web tools and separately gated source-file write capabilities.
+- **Phase 8 — Safe artifacts:** complete with a generated-artifact registry, sandboxed DOCX/XLSX creation, path traversal protection, no-overwrite semantics, spreadsheet formula-injection neutralization, and artifact UI.
+- **Phase 9 — Controlled analysis:** implemented with a bounded AST numeric evaluator plus Workspace-scoped CSV/XLSX inspect, summary, and grouped aggregation tools; gated by CI before merge.
+- Later phases add web research, stronger OS-isolated computation, and separately gated source-file write capabilities.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, and `docs/phase8-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, and `docs/phase9-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -136,6 +140,8 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Generated artifact absolute paths remain local and are not returned to the cloud model.
 - Existing generated filenames are never overwritten.
 - Formula-like spreadsheet strings are neutralized before writing.
+- Phase 9 calculations use an AST allow-list and never expose general Python exec/import/file/network/process access.
+- CSV/XLSX analysis accepts only Workspace File ids and reads parsed cache rather than arbitrary paths.
 - Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
 - Unknown or destructive tool names are denied by default.
 - Source-file overwrite/edit/delete actions are not part of the current phase.
