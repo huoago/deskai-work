@@ -69,7 +69,10 @@ class DataAnalysisService:
             if _valid_identifier(str(key))
         }
         tree = ast.parse(expression, mode="eval")
-        for node in ast.walk(tree):
+        nodes = list(ast.walk(tree))
+        if len(nodes) > 100:
+            raise ValueError("Expression is too complex")
+        for node in nodes:
             if not isinstance(node, ALLOWED_NODES):
                 raise ValueError(f"Unsupported expression element: {type(node).__name__}")
             if isinstance(node, ast.Name) and node.id not in safe_variables and node.id not in ALLOWED_FUNCTIONS:
@@ -79,8 +82,18 @@ class DataAnalysisService:
                     raise ValueError("Only approved numeric functions may be called")
                 if node.keywords:
                     raise ValueError("Keyword arguments are not supported")
-            if isinstance(node, ast.Constant) and not isinstance(node.value, (int, float)):
-                raise ValueError("Only numeric constants are allowed")
+            if isinstance(node, ast.Constant):
+                if not isinstance(node.value, (int, float)):
+                    raise ValueError("Only numeric constants are allowed")
+                if abs(float(node.value)) > 1e100:
+                    raise ValueError("Numeric constant is too large")
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                if not isinstance(node.right, ast.Constant) or not isinstance(
+                    node.right.value, (int, float)
+                ):
+                    raise ValueError("Exponent must be a numeric constant")
+                if abs(float(node.right.value)) > 100:
+                    raise ValueError("Exponent is too large")
 
         value = eval(
             compile(tree, "<deskai-safe-expression>", "eval"),
