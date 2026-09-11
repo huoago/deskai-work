@@ -324,6 +324,10 @@ class FileRecycleBatchService:
                         if item["state"] == "original":
                             continue
                         try:
+                            self._require_recovery_write_access(
+                                batch.workspace_id,
+                                item["original"],
+                            )
                             self.recycle_service._restore_copy_no_overwrite(
                                 item["quarantine"],
                                 item["original"],
@@ -357,6 +361,10 @@ class FileRecycleBatchService:
                     if item["state"] == "original":
                         continue
                     try:
+                        self._require_recovery_write_access(
+                            batch.workspace_id,
+                            item["original"],
+                        )
                         self.recycle_service._restore_copy_no_overwrite(
                             item["quarantine"],
                             item["original"],
@@ -963,6 +971,22 @@ class FileRecycleBatchService:
                 }
             )
         return states
+
+    def _require_recovery_write_access(
+        self,
+        workspace_id: str,
+        original: Path,
+    ) -> None:
+        with self.database.session() as session:
+            root = self.recycle_service._writable_root_for_missing_path(
+                session,
+                workspace_id,
+                original,
+            )
+        if root is None:
+            raise ValueError(
+                f"Workspace write permission is unavailable for {original.name}"
+            )
 
     def _recovery_restore_snapshots(
         self,
