@@ -16,6 +16,8 @@ from sqlalchemy import select
 from app.database.models import (
     AuditLog,
     File,
+    FileOrganizationProposal,
+    FileRecycleProposal,
     SourceFileEdit,
     Task,
     WorkspaceRoot,
@@ -32,6 +34,7 @@ MAX_REPLACEMENTS = 20
 MAX_CELL_EDITS = 100
 MAX_DIFF_PREVIEW = 20000
 FORMULA_PREFIXES = ("=", "+", "-", "@")
+ACTIVE_MUTATION_STATUSES = {"pending", "applying", "rolling_back", "recovery_required"}
 
 
 class SourceFileEditService:
@@ -59,6 +62,7 @@ class SourceFileEditService:
             workspace_id=workspace_id,
             file_id=file_id,
         )
+        self._ensure_no_conflicting_mutation(file_id)
         extension = (file.extension or source.suffix).lower()
         if extension not in SUPPORTED_EDIT_EXTENSIONS:
             raise ValueError("Phase 11 supports source edits only for TXT, MD, DOCX, and XLSX")
@@ -330,6 +334,27 @@ class SourceFileEditService:
             "can_rollback": edit.status == "applied",
             "backup_created": bool(edit.backup_path),
         }
+
+    def _ensure_no_conflicting_mutation(self, file_id: str) -> None:
+        with self.database.session() as session:
+            organization = session.scalar(
+                select(FileOrganizationProposal.id).where(
+                    FileOrganizationProposal.file_id == file_id,
+                    FileOrganizationProposal.status.in_(ACTIVE_MUTATION_STATUSES),
+                )
+            )
+            recycle = session.scalar(
+                select(FileRecycleProposal.id).where(
+                    FileRecycleProposal.file_id == file_id,
+                    FileRecycleProposal.status.in_(
+                        {"pending", "recycling", "restoring", "recovery_required"}
+                    ),
+                )
+            )
+        if organization or recycle:
+            raise ValueError(
+                "File already has an active organization or recycle proposal"
+            )
 
     def _editable_file(
         self,
