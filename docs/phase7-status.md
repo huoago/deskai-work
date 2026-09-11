@@ -87,6 +87,7 @@ Agent execution uses the OpenAI Responses API with custom function tools.
 DeskAI keeps the Agent loop stateless from the provider perspective:
 
 - `store=false`
+- `include=["reasoning.encrypted_content"]` so reasoning items can be carried across stateless tool rounds
 - no OpenAI-hosted conversation is treated as task state
 - DeskAI retains prior Response output items locally for the current run
 - tool results are appended as `function_call_output` items
