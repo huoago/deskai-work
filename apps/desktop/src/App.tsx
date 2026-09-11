@@ -900,7 +900,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 7 · AI + 记忆 + 只读 Agent</span>
+          <span className="phase-chip">Phase 8 · AI + 记忆 + 安全产物 Agent</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1596,7 +1596,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 7</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 8</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1606,7 +1606,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Local Only 模式不会调用云模型</p>
           <p><b>✓</b> 自动记忆不保存密钥、身份/金融凭据及敏感个人信息</p>
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
-          <p><b>✓</b> Phase 7 Agent 仅开放四个只读工具，全部写入 ToolCall/AuditLog</p>
+          <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
+          <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
         </div>
       </article>
     </section>
