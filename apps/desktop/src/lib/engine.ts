@@ -470,6 +470,32 @@ export type ActivityRecord = {
   risk_level: number;
 };
 
+export type RecoveryEntry = {
+  id: string;
+  entity_type:
+    | "source_edit"
+    | "source_edit_batch"
+    | "file_organization"
+    | "file_organization_batch"
+    | "file_recycle"
+    | "file_recycle_batch"
+    | string;
+  scope: "single" | "batch" | string;
+  task_id: string | null;
+  workspace_id: string | null;
+  status: string;
+  summary: string;
+  created_at: string;
+  updated_at: string;
+  error_message: string | null;
+  item_count: number;
+  filenames: string[];
+  paths: string[];
+  action: "rollback" | "restore" | null;
+  recovery_required: boolean;
+  transactional: boolean;
+};
+
 export type DesktopSettings = {
   privacy_mode: "local" | "hybrid" | "cloud";
   default_model: string;
@@ -812,6 +838,13 @@ export function processAgentQueue(limit = 10): Promise<{ processed: number; stat
 export function listActivity(workspaceId?: string): Promise<ActivityRecord[]> {
   const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
   return request<ActivityRecord[]>(`/activity${suffix}`);
+}
+
+export function listRecovery(workspaceId?: string, limit = 300): Promise<RecoveryEntry[]> {
+  const params = new URLSearchParams();
+  if (workspaceId) params.set("workspace_id", workspaceId);
+  params.set("limit", String(limit));
+  return request<RecoveryEntry[]>(`/recovery?${params.toString()}`);
 }
 
 export function listGeneratedArtifacts(workspaceId?: string, taskId?: string): Promise<GeneratedArtifactRecord[]> {
