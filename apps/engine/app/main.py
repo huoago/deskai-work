@@ -20,6 +20,7 @@ from app.api.memory import router as memory_router
 from app.api.providers import router as providers_router
 from app.api.recycle import router as recycle_router
 from app.api.recycle_batches import router as recycle_batches_router
+from app.api.recovery import router as recovery_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
 from app.api.source_edit_batches import router as source_edit_batches_router
@@ -238,6 +239,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(providers_router)
     app.include_router(recycle_router)
     app.include_router(recycle_batches_router)
+    app.include_router(recovery_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
     app.include_router(source_edit_batches_router)
