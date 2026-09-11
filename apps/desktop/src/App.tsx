@@ -1166,7 +1166,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12 写入边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12/13 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
@@ -1555,7 +1555,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，并为 TXT/MD/DOCX/XLSX 生成单文件或 2–10 文件事务提案；所有源文件写入都必须由你确认。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出受控重命名/同根目录移动方案；所有源文件写入和路径变更都必须由你确认。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
