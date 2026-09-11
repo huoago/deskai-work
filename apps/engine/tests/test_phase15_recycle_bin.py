@@ -8,7 +8,7 @@ import pytest
 from docx import Document
 
 from app.ai.provider import AgentResponse, AgentToolRequest
-from app.database.models import File, FileRecycleProposal
+from app.database.models import FileRecycleProposal
 from app.security.secrets import SecretStatus
 
 
