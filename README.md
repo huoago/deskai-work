@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 11 are complete and merged to `main`.**
+**Phase 0 through Phase 11 are complete and merged to `main`. Phase 12 transactional multi-file editing is implemented and pending full CI verification.**
 
 Implemented foundations:
 
@@ -53,9 +53,12 @@ Implemented foundations:
 - Workspace-scoped parsed-cache analysis without arbitrary Python execution
 - provider-backed read-only public web research with preserved source URLs
 - secret-like web query blocking and Local Only enforcement
+- staged single-file TXT/MD/DOCX/XLSX source edits with explicit confirmation
+- 2–10 file transactional edit batches with all-or-nothing confirmation
+- batch-wide SHA/write/lock preflight, backups, failure rollback, and startup recovery
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, and stage confirmed edits to existing TXT/MD/DOCX/XLSX files. Source files are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, backup, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, or unconfirmed destructive file operations.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, and stage coordinated 2–10 file all-or-nothing edit transactions. Source files are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, backups, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, file delete/move/rename, or unconfirmed destructive file operations.
 
 ## V1 phase boundaries
 
@@ -72,7 +75,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 10 — Controlled web research:** complete with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating.
 - Later phases add stronger OS-isolated computation and separately gated source-file write capabilities.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, and `docs/phase11-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, and `docs/phase12-status.md` for the current implementation.
 
 ## Repository layout
 
