@@ -1,0 +1,282 @@
+.tasks-page,
+.activity-page {
+  display: grid;
+  gap: 14px;
+}
+
+.task-create-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.task-request {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+}
+
+.task-submit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.task-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, .75fr) minmax(0, 1.25fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.task-list {
+  display: grid;
+  gap: 7px;
+}
+
+.task-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+}
+
+.task-row.selected {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.task-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.task-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0f172a;
+  font-size: 11px;
+}
+
+.task-row span,
+.task-row small {
+  color: #94a3b8;
+  font-size: 9px;
+}
+
+.task-row-status {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+}
+
+.task-status {
+  display: inline-flex;
+  padding: 4px 7px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.task-status.completed {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.task-status.running {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.task-status.failed,
+.task-status.blocked {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.task-progress-track {
+  height: 6px;
+  margin: 12px 0;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.task-progress-track span {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  color: #2563eb;
+  transition: width .2s ease;
+}
+
+.task-result {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #dcfce7;
+  border-radius: 10px;
+  background: #f0fdf4;
+}
+
+.task-result strong {
+  color: #166534;
+  font-size: 10px;
+}
+
+.task-result p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  line-height: 1.65;
+  font-size: 11px;
+}
+
+.task-run-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 8px;
+  color: #64748b;
+  font-size: 9px;
+}
+
+.tool-call-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tool-call-card {
+  padding: 10px 11px;
+  border: 1px solid #e5e7eb;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.tool-call-card > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tool-call-card strong {
+  color: #0f172a;
+  font-size: 10px;
+}
+
+.tool-call-card span {
+  color: #64748b;
+  font-size: 9px;
+}
+
+.tool-call-card code {
+  display: block;
+  margin-top: 7px;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 9px;
+}
+
+.tool-call-card p {
+  margin: 7px 0 0;
+  color: #475569;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.empty-task-detail {
+  padding: 48px 20px;
+  text-align: center;
+}
+
+.activity-list {
+  display: grid;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.activity-time {
+  color: #94a3b8;
+  font-size: 9px;
+}
+
+.activity-main > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.activity-main strong {
+  color: #0f172a;
+  font-size: 10px;
+}
+
+.activity-tool,
+.risk-badge {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 8px;
+}
+
+.risk-badge {
+  font-weight: 700;
+}
+
+.activity-main p {
+  margin: 5px 0;
+  color: #475569;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.activity-main small {
+  color: #94a3b8;
+  font-size: 8px;
+}
+
+@media (max-width: 980px) {
+  .task-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .task-submit-row,
+  .activity-row {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .activity-row {
+    display: grid;
+  }
+}

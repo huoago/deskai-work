@@ -1,0 +1,380 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+from sqlalchemy import select
+
+from app.agent.permissions import PermissionGate
+from app.database.models import AuditLog, File, FileVersion, ToolCall
+from app.database.session import Database
+
+
+@dataclass(frozen=True, slots=True)
+class ToolSpec:
+    name: str
+    description: str
+    parameters: dict[str, Any]
+
+    def as_openai_tool(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+            "strict": True,
+        }
+
+
+class ToolRegistry:
+    def __init__(
+        self,
+        database: Database,
+        hybrid_search,
+        memory_service,
+        parser_cache,
+    ) -> None:
+        self.database = database
+        self.hybrid_search = hybrid_search
+        self.memory_service = memory_service
+        self.parser_cache = parser_cache
+        self.permission_gate = PermissionGate(database)
+        self._specs = {spec.name: spec for spec in _tool_specs()}
+        self._handlers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] = {
+            "search_knowledge": self._search_knowledge,
+            "search_memory": self._search_memory,
+            "list_workspace_files": self._list_workspace_files,
+            "read_parsed_document": self._read_parsed_document,
+        }
+
+    def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
+        definitions: list[dict[str, Any]] = []
+        for spec in self._specs.values():
+            decision = self.permission_gate.check(
+                workspace_id=workspace_id,
+                tool_name=spec.name,
+            )
+            if decision.allowed and not decision.requires_confirmation:
+                definitions.append(spec.as_openai_tool())
+        return definitions
+
+    def execute(
+        self,
+        *,
+        agent_run_id: str,
+        task_id: str,
+        workspace_id: str | None,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        decision = self.permission_gate.check(
+            workspace_id=workspace_id,
+            tool_name=tool_name,
+        )
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            call = ToolCall(
+                agent_run_id=agent_run_id,
+                tool_name=tool_name,
+                arguments_json=arguments,
+                status="running" if decision.allowed else "denied",
+                risk_level=decision.risk_level,
+                confirmation_required=decision.requires_confirmation,
+                confirmed=False,
+                started_at=now,
+            )
+            session.add(call)
+            session.flush()
+            call_id = call.id
+
+            if not decision.allowed or decision.requires_confirmation:
+                reason = (
+                    decision.reason
+                    if not decision.allowed
+                    else "Tool requires confirmation and cannot run automatically"
+                )
+                call.result_summary = reason
+                call.completed_at = now
+                session.add(
+                    AuditLog(
+                        task_id=task_id,
+                        agent_run_id=agent_run_id,
+                        tool=tool_name,
+                        action="tool_denied",
+                        target=workspace_id,
+                        result=reason,
+                        risk_level=decision.risk_level,
+                    )
+                )
+                return {
+                    "ok": False,
+                    "error": reason,
+                    "tool_call_id": call_id,
+                }
+
+        handler = self._handlers.get(tool_name)
+        if handler is None:
+            return self._record_failure(
+                call_id=call_id,
+                task_id=task_id,
+                agent_run_id=agent_run_id,
+                tool_name=tool_name,
+                workspace_id=workspace_id,
+                risk_level=decision.risk_level,
+                error="Unknown tool",
+            )
+
+        try:
+            result = handler(str(workspace_id), arguments)
+        except Exception as exc:
+            return self._record_failure(
+                call_id=call_id,
+                task_id=task_id,
+                agent_run_id=agent_run_id,
+                tool_name=tool_name,
+                workspace_id=workspace_id,
+                risk_level=decision.risk_level,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+        summary = _compact_json(result, max_chars=4000)
+        with self.database.session() as session:
+            call = session.get(ToolCall, call_id)
+            if call is not None:
+                call.status = "completed"
+                call.result_summary = summary
+                call.completed_at = datetime.now(timezone.utc)
+            session.add(
+                AuditLog(
+                    task_id=task_id,
+                    agent_run_id=agent_run_id,
+                    tool=tool_name,
+                    action="tool_completed",
+                    target=workspace_id,
+                    result=summary,
+                    risk_level=decision.risk_level,
+                )
+            )
+        return {"ok": True, "tool_call_id": call_id, "result": result}
+
+    def _record_failure(
+        self,
+        *,
+        call_id: str,
+        task_id: str,
+        agent_run_id: str,
+        tool_name: str,
+        workspace_id: str | None,
+        risk_level: int,
+        error: str,
+    ) -> dict[str, Any]:
+        error = error[:4000]
+        with self.database.session() as session:
+            call = session.get(ToolCall, call_id)
+            if call is not None:
+                call.status = "failed"
+                call.result_summary = error
+                call.completed_at = datetime.now(timezone.utc)
+            session.add(
+                AuditLog(
+                    task_id=task_id,
+                    agent_run_id=agent_run_id,
+                    tool=tool_name,
+                    action="tool_failed",
+                    target=workspace_id,
+                    result=error,
+                    risk_level=risk_level,
+                )
+            )
+        return {"ok": False, "error": error, "tool_call_id": call_id}
+
+    def _search_knowledge(self, workspace_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        query = str(arguments.get("query") or "").strip()
+        limit = _bounded_int(arguments.get("limit"), default=6, minimum=1, maximum=8)
+        if not query:
+            raise ValueError("query is required")
+        hits = self.hybrid_search.search(workspace_id, query, limit=limit)
+        distilled = []
+        for hit in hits:
+            distilled.append(
+                {
+                    "chunk_id": hit["chunk_id"],
+                    "file_id": hit["file_id"],
+                    "filename": hit["filename"],
+                    "citation_label": hit["citation_label"],
+                    "locator": hit["locator"],
+                    "score": hit["score"],
+                    "content": str(hit["content"])[:3500],
+                }
+            )
+        return {"query": query, "count": len(distilled), "results": distilled}
+
+    def _search_memory(self, workspace_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        query = str(arguments.get("query") or "").strip()
+        limit = _bounded_int(arguments.get("limit"), default=6, minimum=1, maximum=8)
+        if not query:
+            raise ValueError("query is required")
+        results = self.memory_service.retrieve(
+            workspace_id=workspace_id,
+            query=query,
+            limit=limit,
+        )
+        return {"query": query, "count": len(results), "results": results}
+
+    def _list_workspace_files(
+        self,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        status = str(arguments.get("status") or "any")
+        limit = _bounded_int(arguments.get("limit"), default=50, minimum=1, maximum=100)
+        with self.database.session() as session:
+            statement = (
+                select(File)
+                .where(File.workspace_id == workspace_id)
+                .order_by(File.filename)
+                .limit(limit)
+            )
+            if status != "any":
+                statement = statement.where(File.status == status)
+            files = session.scalars(statement).all()
+            rows = [
+                {
+                    "file_id": item.id,
+                    "filename": item.filename,
+                    "extension": item.extension,
+                    "mime_type": item.mime_type,
+                    "size": item.size,
+                    "status": item.status,
+                    "modified_at": item.modified_at.isoformat() if item.modified_at else None,
+                    "sha256": item.sha256,
+                }
+                for item in files
+            ]
+        return {"status_filter": status, "count": len(rows), "files": rows}
+
+    def _read_parsed_document(
+        self,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        file_id = str(arguments.get("file_id") or "").strip()
+        max_chars = _bounded_int(arguments.get("max_chars"), default=12000, minimum=1000, maximum=20000)
+        max_units = _bounded_int(arguments.get("max_units"), default=20, minimum=1, maximum=40)
+        if not file_id:
+            raise ValueError("file_id is required")
+
+        with self.database.session() as session:
+            file = session.get(File, file_id)
+            if file is None or file.workspace_id != workspace_id:
+                raise ValueError("File is not available in the active Workspace")
+            if file.status not in {"parsed", "indexed"} or not file.current_version_id:
+                raise ValueError("File has not completed parsing")
+            version = session.get(FileVersion, file.current_version_id)
+            if version is None:
+                raise ValueError("Current file version is missing")
+            filename = file.filename
+            sha256 = version.sha256
+
+        payload = self.parser_cache.read(sha256)
+        if payload is None:
+            raise ValueError("Parsed cache is missing")
+        text = str(payload.get("text") or "")
+        units = list(payload.get("units") or [])
+        return {
+            "file_id": file_id,
+            "filename": filename,
+            "parser": payload.get("parser"),
+            "file_type": payload.get("file_type"),
+            "title": payload.get("title"),
+            "metadata": payload.get("metadata") or {},
+            "text": text[:max_chars],
+            "text_truncated": len(text) > max_chars,
+            "units": units[:max_units],
+            "units_truncated": len(units) > max_units,
+        }
+
+
+def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
+
+
+def _compact_json(value: Any, *, max_chars: int) -> str:
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    return text[:max_chars]
+
+
+def _tool_specs() -> list[ToolSpec]:
+    return [
+        ToolSpec(
+            name="search_knowledge",
+            description="Search indexed documents inside the active Workspace. Read-only.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+                },
+                "required": ["query", "limit"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="search_memory",
+            description="Search durable user memories relevant to the active Workspace. Read-only.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 8},
+                },
+                "required": ["query", "limit"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="list_workspace_files",
+            description="List file metadata already authorized in the active Workspace. Does not read file bytes.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "any",
+                            "pending",
+                            "parsed",
+                            "indexed",
+                            "failed",
+                            "unsupported",
+                            "deleted",
+                            "revoked",
+                        ],
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                },
+                "required": ["status", "limit"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="read_parsed_document",
+            description="Read the existing parsed cache for one file in the active Workspace. Read-only and Workspace-scoped.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "minLength": 1},
+                    "max_chars": {"type": "integer", "minimum": 1000, "maximum": 20000},
+                    "max_units": {"type": "integer", "minimum": 1, "maximum": 40},
+                },
+                "required": ["file_id", "max_chars", "max_units"],
+                "additionalProperties": False,
+            },
+        ),
+    ]

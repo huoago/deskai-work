@@ -205,6 +205,72 @@ export type MemoryStatus = {
   blocked_jobs: number;
 };
 
+export type TaskRecord = {
+  id: string;
+  workspace_id: string | null;
+  title: string;
+  user_request: string;
+  status: "pending" | "running" | "completed" | "failed" | "blocked";
+  progress: number;
+  result_text: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type AgentRunRecord = {
+  id: string;
+  model: string | null;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  input_tokens: number;
+  output_tokens: number;
+};
+
+export type AgentToolCallRecord = {
+  id: string;
+  agent_run_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown> | null;
+  result_summary: string | null;
+  status: string;
+  risk_level: number;
+  confirmation_required: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type TaskDetail = TaskRecord & {
+  runs: AgentRunRecord[];
+  tool_calls: AgentToolCallRecord[];
+};
+
+export type AgentStatus = {
+  running: boolean;
+  processed: number;
+  failed: number;
+  blocked: number;
+  last_task_id: string | null;
+  last_completed_at: string | null;
+  last_error: string | null;
+  workspace_id: string | null;
+  task_counts: Record<string, number>;
+};
+
+export type ActivityRecord = {
+  id: string;
+  timestamp: string;
+  task_id: string | null;
+  agent_run_id: string | null;
+  tool: string | null;
+  action: string;
+  target: string | null;
+  result: string | null;
+  risk_level: number;
+};
+
 export type DesktopSettings = {
   privacy_mode: "local" | "hybrid" | "cloud";
   default_model: string;
@@ -437,6 +503,44 @@ export function createConversation(workspaceId?: string): Promise<Conversation> 
 
 export function listMessages(conversationId: string): Promise<ChatMessage[]> {
   return request<ChatMessage[]>(`/conversations/${conversationId}/messages`);
+}
+
+export function listTasks(workspaceId?: string): Promise<TaskRecord[]> {
+  const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return request<TaskRecord[]>(`/tasks${suffix}`);
+}
+
+export function createTask(workspaceId: string, userRequest: string, title?: string): Promise<TaskRecord> {
+  return request<TaskRecord>("/tasks", {
+    method: "POST",
+    body: JSON.stringify({
+      workspace_id: workspaceId,
+      request: userRequest,
+      title: title || null,
+    }),
+  });
+}
+
+export function getTask(taskId: string): Promise<TaskDetail> {
+  return request<TaskDetail>(`/tasks/${taskId}`);
+}
+
+export function retryTask(taskId: string): Promise<TaskRecord> {
+  return request<TaskRecord>(`/tasks/${taskId}/retry`, { method: "POST" });
+}
+
+export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {
+  const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return request<AgentStatus>(`/agent/status${suffix}`);
+}
+
+export function processAgentQueue(limit = 10): Promise<{ processed: number; status: AgentStatus }> {
+  return request(`/agent/process?limit=${encodeURIComponent(String(limit))}`, { method: "POST" });
+}
+
+export function listActivity(workspaceId?: string): Promise<ActivityRecord[]> {
+  const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return request<ActivityRecord[]>(`/activity${suffix}`);
 }
 
 export function getDesktopSettings(): Promise<DesktopSettings> {

@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 5 are complete. Phase 6 durable memory and autonomous learning is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 6 are complete. Phase 7 audited read-only Agent execution is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -38,9 +38,14 @@ Implemented foundations:
 - structured automatic extraction with confidence/sensitivity gates
 - Memory correction/version history and Workspace isolation
 - desktop Memory review/edit/deactivate/reactivate UI
+- persistent Agent Task queue and restart recovery
+- Responses function-calling Orchestrator with store=false
+- read-only Tool Registry + Permission Gate
+- ToolCall + AuditLog execution history
+- desktop Tasks and Activity audit pages
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers and maintain durable user-provided long-term memory with reviewable version history. It still does **not** claim neural semantic embeddings, local LLM execution, or autonomous agent/tool execution yet.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, and execute audited read-only Agent tasks inside an authorized Workspace. It still does **not** claim neural semantic embeddings, local LLM execution, destructive file actions, arbitrary shell execution, or GUI/browser control yet.
 
 ## V1 phase boundaries
 
@@ -50,10 +55,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 3 — Parser:** implemented for TXT/MD, CSV, PDF, DOCX, XLSX, PPTX and JPG/PNG metadata; gated by CI before merge.
 - **Phase 4 — Knowledge base:** complete with Chunks, SQLite FTS5, deterministic local vectors, LanceDB, hybrid retrieval, and source citation labels.
 - **Phase 5 — AI chat:** complete with secure provider configuration, Responses API streaming, local RAG grounding, conversation history, and persisted citations.
-- **Phase 6 — Durable memory:** implemented with persistent learning jobs, Structured Output extraction, sensitivity gates, correction/version history, retrieval injection, and Memory UI; gated by CI before merge.
-- Later phases add auditable agent/tool execution.
+- **Phase 6 — Durable memory:** complete with persistent learning jobs, Structured Output extraction, sensitivity gates, correction/version history, retrieval injection, and Memory UI.
+- **Phase 7 — Agent execution:** implemented with persistent Tasks, restart recovery, Responses function calling, a read-only Tool Registry, Permission Gate, ToolCall/AuditLog persistence, and Tasks/Activity UI; gated by CI before merge.
+- Later phases add gated write-capable tools.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, and `docs/phase6-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, and `docs/phase7-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -119,6 +125,9 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Retrieved document content is treated as untrusted data, never as system instructions.
 - Memory candidates are independently filtered for credentials and sensitive personal information.
 - Memory corrections preserve version history instead of silently erasing the previous value.
+- Phase 7 Agent receives only four read-only Workspace-scoped tools.
+- Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
+- Unknown or destructive tool names are denied by default.
 - Destructive file actions are not part of the current phase.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.

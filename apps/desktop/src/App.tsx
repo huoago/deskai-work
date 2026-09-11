@@ -4,27 +4,34 @@ import {
   addWorkspaceRoot,
   checkEngine,
   createMemory,
+  createTask,
   createWorkspace,
   deactivateMemory,
   deleteOpenAIApiKey,
   getDesktopSettings,
   getIndexQueueSummary,
+  getAgentStatus,
   getKnowledgeStatus,
   getMemoryStatus,
   getOpenAIProviderStatus,
   getParsedPreview,
   getParserStatus,
+  getTask,
   getWorkspaceWatcherStatus,
+  listActivity,
   listConversations,
   listFiles,
   listMemories,
   listMessages,
+  listTasks,
   listWorkspaceRoots,
   listWorkspaces,
+  processAgentQueue,
   processKnowledgeQueue,
   processMemoryQueue,
   processParserQueue,
   retryMemoryQueue,
+  retryTask,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -34,6 +41,8 @@ import {
   updateDesktopSettings,
   updateMemory,
   updateWorkspaceRoot,
+  type ActivityRecord,
+  type AgentStatus,
   type ChatMessage,
   type Conversation,
   type DesktopSettings,
@@ -48,6 +57,8 @@ import {
   type ParsedPreview,
   type ParserStatus,
   type SearchHit,
+  type TaskDetail,
+  type TaskRecord,
   type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
@@ -58,16 +69,16 @@ type EngineState =
   | { kind: "online"; connection: EngineConnection }
   | { kind: "offline"; message: string };
 
-type Page = "chat" | "workspace" | "files" | "search" | "memory" | "settings";
+type Page = "chat" | "workspace" | "files" | "search" | "memory" | "tasks" | "activity" | "settings";
 
-const nav: Array<{ id: Page | "tasks" | "activity"; label: string; enabled: boolean; phase?: string }> = [
+const nav: Array<{ id: Page; label: string; enabled: boolean; phase?: string }> = [
   { id: "chat", label: "对话", enabled: true },
   { id: "workspace", label: "工作区", enabled: true },
   { id: "files", label: "文件", enabled: true },
   { id: "search", label: "资料检索", enabled: true },
   { id: "memory", label: "记忆", enabled: true },
-  { id: "tasks", label: "任务", enabled: false, phase: "Phase 7" },
-  { id: "activity", label: "活动", enabled: false, phase: "Phase 7" },
+  { id: "tasks", label: "任务", enabled: true },
+  { id: "activity", label: "活动", enabled: true },
 ];
 
 const defaultSettings: DesktopSettings = {
@@ -101,6 +112,11 @@ export default function App() {
   const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
+  const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [activity, setActivity] = useState<ActivityRecord[]>([]);
+  const [taskRequest, setTaskRequest] = useState("");
+  const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -164,6 +180,10 @@ export default function App() {
       setKnowledgeStatus(null);
       setMemories([]);
       setMemoryStatus(null);
+      setTasks([]);
+      setAgentStatus(null);
+      setActivity([]);
+      setTaskDetail(null);
       setSearchResults([]);
       setPreview(null);
       setActiveConversationId("");
@@ -186,7 +206,7 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory"].includes(page)) return;
+    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory", "tasks", "activity"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
         listFiles(activeWorkspaceId),
@@ -196,8 +216,11 @@ export default function App() {
         getKnowledgeStatus(activeWorkspaceId),
         listMemories(activeWorkspaceId, true, true),
         getMemoryStatus(activeWorkspaceId),
+        listTasks(activeWorkspaceId),
+        getAgentStatus(activeWorkspaceId),
+        listActivity(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
@@ -205,6 +228,9 @@ export default function App() {
           setKnowledgeStatus(nextKnowledgeStatus);
           setMemories(nextMemories);
           setMemoryStatus(nextMemoryStatus);
+          setTasks(nextTasks);
+          setAgentStatus(nextAgentStatus);
+          setActivity(nextActivity);
         })
         .catch(() => undefined);
     }, 3000);
@@ -222,7 +248,7 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
@@ -232,6 +258,9 @@ export default function App() {
       getKnowledgeStatus(workspaceId),
       listMemories(workspaceId, true, true),
       getMemoryStatus(workspaceId),
+      listTasks(workspaceId),
+      getAgentStatus(workspaceId),
+      listActivity(workspaceId),
     ]);
     setRoots(nextRoots);
     setFiles(nextFiles);
@@ -242,6 +271,9 @@ export default function App() {
     setKnowledgeStatus(nextKnowledgeStatus);
     setMemories(nextMemories);
     setMemoryStatus(nextMemoryStatus);
+    setTasks(nextTasks);
+    setAgentStatus(nextAgentStatus);
+    setActivity(nextActivity);
     setActiveConversationId((current) => {
       if (current && nextConversations.some((item) => item.id === current)) return current;
       return nextConversations[0]?.id ?? "";
@@ -534,6 +566,61 @@ export default function App() {
     }
   }
 
+  async function onCreateTask() {
+    if (!activeWorkspaceId || !taskRequest.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const task = await createTask(activeWorkspaceId, taskRequest.trim());
+      setTaskRequest("");
+      setTasks((current) => [task, ...current]);
+      setTaskDetail(await getTask(task.id));
+      setNotice("Agent 任务已进入持久化队列。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "创建 Agent 任务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSelectTask(taskId: string) {
+    try {
+      setTaskDetail(await getTask(taskId));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "加载任务详情失败");
+    }
+  }
+
+  async function onRetryTask(taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await retryTask(taskId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("任务已重新进入 Agent 队列。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重试任务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onProcessAgentQueue() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await processAgentQueue(10);
+      await refreshWorkspaceData();
+      if (taskDetail) setTaskDetail(await getTask(taskDetail.id));
+      setNotice(`Agent 队列处理完成：本次处理 ${result.processed} 个任务。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Agent 队列处理失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -724,6 +811,22 @@ export default function App() {
             onDeactivate={onDeactivateMemory}
             onReactivate={onReactivateMemory}
           />
+        ) : page === "tasks" ? (
+          <TasksPage
+            workspace={activeWorkspace}
+            tasks={tasks}
+            status={agentStatus}
+            detail={taskDetail}
+            request={taskRequest}
+            setRequest={setTaskRequest}
+            disabled={!online || busy}
+            onCreate={onCreateTask}
+            onSelect={onSelectTask}
+            onRetry={onRetryTask}
+            onProcess={onProcessAgentQueue}
+          />
+        ) : page === "activity" ? (
+          <ActivityPage activity={activity} />
         ) : (
           <SettingsPage
             values={desktopSettings}
@@ -797,7 +900,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 6 · AI + 本地资料 + 长期记忆</span>
+          <span className="phase-chip">Phase 7 · AI + 记忆 + 只读 Agent</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1227,6 +1330,179 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess }: {
+  workspace: Workspace | null;
+  tasks: TaskRecord[];
+  status: AgentStatus | null;
+  detail: TaskDetail | null;
+  request: string;
+  setRequest: (value: string) => void;
+  disabled: boolean;
+  onCreate: () => void;
+  onSelect: (taskId: string) => void;
+  onRetry: (taskId: string) => void;
+  onProcess: () => void;
+}) {
+  const pending = tasks.filter((item) => item.status === "pending").length;
+  const running = tasks.filter((item) => item.status === "running").length;
+  const completed = tasks.filter((item) => item.status === "completed").length;
+  const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
+
+  return (
+    <section className="tasks-page">
+      <div className="knowledge-status-grid">
+        <Metric label="待执行" value={String(pending)} />
+        <Metric label="执行中" value={String(running)} />
+        <Metric label="已完成" value={String(completed)} />
+        <Metric label="需处理" value={String(attention)} />
+        <Metric label="Agent Worker" value={status?.running ? "运行中" : "未运行"} />
+      </div>
+
+      <article className="panel task-create-panel">
+        <div className="panel-head">
+          <div>
+            <h3>创建 Agent 任务</h3>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Phase 7 只允许读取知识库、记忆、授权文件清单和解析缓存。</p>
+          </div>
+          <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
+        </div>
+        <textarea
+          className="task-request"
+          value={request}
+          onChange={(event) => setRequest(event.target.value)}
+          placeholder="例如：查阅当前项目资料和长期记忆，整理324水表数量、来源及尚待确认的问题。"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onCreate();
+          }}
+        />
+        <div className="task-submit-row">
+          <span>Ctrl/⌘ + Enter 创建任务</span>
+          <button className="primary" onClick={onCreate} disabled={disabled || !request.trim()}>交给 Agent</button>
+        </div>
+      </article>
+
+      <div className="task-layout">
+        <article className="panel task-list-panel">
+          <div className="panel-head"><h3>任务队列</h3><span>{tasks.length} 个</span></div>
+          <div className="task-list">
+            {tasks.map((task) => (
+              <button
+                className={detail?.id === task.id ? "task-row selected" : "task-row"}
+                key={task.id}
+                onClick={() => onSelect(task.id)}
+              >
+                <div>
+                  <strong>{task.title}</strong>
+                  <span>{formatDate(task.created_at)}</span>
+                </div>
+                <div className="task-row-status">
+                  <span className={`task-status ${task.status}`}>{taskStatusLabel(task.status)}</span>
+                  <small>{Math.round(task.progress * 100)}%</small>
+                </div>
+              </button>
+            ))}
+            {!tasks.length && <p className="muted">还没有 Agent 任务。</p>}
+          </div>
+        </article>
+
+        <article className="panel task-detail-panel">
+          {!detail ? (
+            <div className="empty-task-detail"><h3>选择一个任务</h3><p className="muted">可查看结果、模型运行和完整工具调用记录。</p></div>
+          ) : (
+            <>
+              <div className="panel-head">
+                <div><h3>{detail.title}</h3><p className="muted small">{detail.user_request}</p></div>
+                <span className={`task-status ${detail.status}`}>{taskStatusLabel(detail.status)}</span>
+              </div>
+              <div className="task-progress-track"><span style={{ width: `${Math.round(detail.progress * 100)}%` }} /></div>
+
+              {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
+              {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
+
+              {["failed", "blocked"].includes(detail.status) && (
+                <button className="secondary" onClick={() => onRetry(detail.id)} disabled={disabled}>重新入队</button>
+              )}
+
+              <div className="task-run-summary">
+                <span>运行 {detail.runs.length} 次</span>
+                <span>工具调用 {detail.tool_calls.length} 次</span>
+                <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
+              </div>
+
+              <div className="tool-call-list">
+                {detail.tool_calls.map((call) => (
+                  <article className="tool-call-card" key={call.id}>
+                    <div><strong>{call.tool_name}</strong><span>风险 L{call.risk_level} · {call.status}</span></div>
+                    <code>{JSON.stringify(call.arguments ?? {}, null, 2)}</code>
+                    {call.result_summary && <p>{call.result_summary}</p>}
+                  </article>
+                ))}
+                {!detail.tool_calls.length && <p className="muted small">该任务尚未产生工具调用。</p>}
+              </div>
+            </>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
+  return (
+    <section className="activity-page">
+      <article className="panel activity-panel">
+        <div className="panel-head">
+          <div><h3>Agent 审计日志</h3><p className="muted small">每次 Agent 启动、工具完成、拒绝和失败都会留下持久化记录。</p></div>
+          <span>{activity.length} 条</span>
+        </div>
+        <div className="activity-list">
+          {activity.map((item) => (
+            <article className="activity-row" key={item.id}>
+              <div className="activity-time">{formatDate(item.timestamp)}</div>
+              <div className="activity-main">
+                <div>
+                  <strong>{activityLabel(item.action)}</strong>
+                  {item.tool && <span className="activity-tool">{item.tool}</span>}
+                  <span className={`risk-badge risk-${Math.min(item.risk_level, 8)}`}>L{item.risk_level}</span>
+                </div>
+                {item.result && <p>{item.result}</p>}
+                <small>{item.task_id ? `Task ${item.task_id.slice(0, 8)}` : "系统事件"}</small>
+              </div>
+            </article>
+          ))}
+          {!activity.length && <p className="muted">当前 Workspace 还没有 Agent 审计事件。</p>}
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function taskStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "待执行",
+    running: "执行中",
+    completed: "已完成",
+    failed: "失败",
+    blocked: "已阻断",
+  };
+  return labels[status] ?? status;
+}
+
+function activityLabel(action: string) {
+  const labels: Record<string, string> = {
+    agent_started: "Agent 开始",
+    agent_completed: "Agent 完成",
+    agent_failed: "Agent 失败",
+    agent_blocked: "Agent 被策略阻断",
+    agent_interrupted: "Agent 异常中断",
+    worker_failed: "Worker 失败",
+    tool_completed: "工具调用完成",
+    tool_failed: "工具调用失败",
+    tool_denied: "工具调用被拒绝",
+  };
+  return labels[action] ?? action;
+}
+
 function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, apiKeyDraft, setApiKeyDraft, providerAction, onSaveApiKey, onDeleteApiKey, onTestProvider }: {
   values: DesktopSettings;
   onChange: (values: DesktopSettings) => void;
@@ -1296,7 +1572,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 6</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 7</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1306,6 +1582,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Local Only 模式不会调用云模型</p>
           <p><b>✓</b> 自动记忆不保存密钥、身份/金融凭据及敏感个人信息</p>
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
+          <p><b>✓</b> Phase 7 Agent 仅开放四个只读工具，全部写入 ToolCall/AuditLog</p>
         </div>
       </article>
     </section>
@@ -1322,6 +1599,8 @@ function pageTitle(page: Page) {
   if (page === "files") return "文件解析与预览";
   if (page === "search") return "资料检索与引用";
   if (page === "memory") return "长期记忆与自主学习";
+  if (page === "tasks") return "Agent 任务";
+  if (page === "activity") return "Agent 活动与审计";
   return "设置";
 }
 
