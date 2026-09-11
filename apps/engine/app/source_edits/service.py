@@ -54,7 +54,7 @@ class SourceFileEditService:
         replacements: list[dict[str, Any]],
         cell_edits: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        file, root, source = self._editable_file(
+        file, _root, source = self._editable_file(
             task_id=task_id,
             workspace_id=workspace_id,
             file_id=file_id,
