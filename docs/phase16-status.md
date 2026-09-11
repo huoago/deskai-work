@@ -1,6 +1,6 @@
 # Phase 16 — Transactional batch recycle
 
-Status: implemented on the Phase 16 branch and pending full CI verification.
+Status: complete, fully verified, hardened, and merged to `main`.
 
 ## Objective
 
@@ -81,14 +81,56 @@ Phase 16 tests cover:
 - Agent can only stage a pending transactional recycle batch;
 - permanent-delete batch endpoint is absent.
 
-Required CI gates:
+### Merge verification
 
-- Ruff;
-- full Engine Pytest suite;
-- TypeScript typecheck;
-- Vite production build;
-- Windows PyInstaller sidecar;
-- packaged Engine 0.16.0 smoke;
-- packaged `/recycle-batches` API smoke;
-- Tauri NSIS/MSI;
-- Windows Artifact upload.
+Phase 16 feature PR #24 passed the complete CI pipeline on Run #82 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **114 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.16.0** health smoke — passed;
+- packaged `/recycle-proposals` API smoke — passed;
+- packaged `/recycle-batches` API smoke — passed;
+- Tauri Windows NSIS/MSI build — passed;
+- Windows Artifact upload — passed.
+
+Feature PR #24 was squash merged to `main` as:
+
+`30d422e71c78be7de2d7fbb87b37daac73c688a1`
+
+After merge, a restore-race hardening review found one additional edge case: if the currently failing restore member left unexpected content at its original path, rollback needed to validate the **complete batch snapshot**, not only members whose restore calls had already returned success.
+
+Focused hardening PR #26 added that protection, a dedicated regression test, and loaded the recycle workflow desktop stylesheet.
+
+PR #26 passed full CI on Run #84:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **115 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.16.0** health smoke — passed;
+- packaged `/recycle-proposals` API smoke — passed;
+- packaged `/recycle-batches` API smoke — passed;
+- Tauri Windows NSIS/MSI build — passed;
+- Windows Artifact upload — passed.
+
+The hardening PR was squash merged to `main` as:
+
+`7ab7be0217ab4d0eb9c20bcb5006299ad8b7eddc`
+
+Final verified Windows installers:
+
+- `DeskAI Work_0.1.0_x64-setup.exe`;
+- `DeskAI Work_0.1.0_x64_en-US.msi`.
+
+Final Windows Artifact from Run #84:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10282043965`;
+- size: `394358241` bytes;
+- SHA-256: `bdce10a646614bd9f808ac1f49b40f6cdebe040c79cf205184fa074db80cd243`.
+
+The final regression matrix additionally verifies that unexpected concurrent content at a failing restore member is never auto-deleted and forces the batch into `recovery_required` instead of falsely reporting a complete recycled state.
