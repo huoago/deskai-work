@@ -261,6 +261,7 @@ export type SourceFileEditRecord = {
   task_id: string;
   workspace_id: string;
   file_id: string;
+  batch_id: string | null;
   filename: string;
   kind: "text" | "docx" | "xlsx" | string;
   status: "pending" | "applied" | "rejected" | "rolled_back" | string;
