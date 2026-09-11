@@ -64,6 +64,20 @@ try {
   }
 
   Write-Host "Packaged OpenAI provider endpoint OK: configured=$($provider.configured), model=$($provider.model)"
+
+  try {
+    $agent = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/agent/status" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Agent status endpoint failed: $($_.Exception.Message)"
+  }
+
+  if ($null -eq $agent.running -or $null -eq $agent.task_counts) {
+    Write-EngineLogs
+    throw "Packaged Agent status endpoint returned an invalid payload."
+  }
+
+  Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force
