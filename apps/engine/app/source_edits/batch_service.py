@@ -3,7 +3,6 @@ from __future__ import annotations
 import shutil
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
