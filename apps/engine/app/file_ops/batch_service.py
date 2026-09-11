@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -980,6 +979,8 @@ class FileOrganizationBatchService:
                     )
                 ).all()
             )
+            for root in roots:
+                session.expunge(root)
 
         if len(proposals) != batch.operation_count:
             raise ValueError("File organization batch membership is incomplete")
