@@ -117,6 +117,10 @@ class FileRecycleService:
                 quarantine,
                 snapshot["original_sha256"],
             )
+            if sha256_file(source) != snapshot["original_sha256"]:
+                raise ValueError(
+                    "Source file changed while the quarantine copy was being prepared"
+                )
             source.unlink()
             if source.exists() or source.is_symlink():
                 raise ValueError("Source path still exists after recycle operation")
