@@ -85,7 +85,10 @@ class DataAnalysisService:
             if isinstance(node, ast.Constant):
                 if not isinstance(node.value, (int, float)):
                     raise ValueError("Only numeric constants are allowed")
-                if abs(float(node.value)) > 1e100:
+                if isinstance(node.value, int):
+                    if abs(node.value) > 10**100:
+                        raise ValueError("Numeric constant is too large")
+                elif not math.isfinite(node.value) or abs(node.value) > 1e100:
                     raise ValueError("Numeric constant is too large")
             if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
                 if not isinstance(node.right, ast.Constant) or not isinstance(
