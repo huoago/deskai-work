@@ -1406,7 +1406,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1418,11 +1418,15 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onSelect: (taskId: string) => void;
   onRetry: (taskId: string) => void;
   onProcess: () => void;
+  onConfirmEdit: (editId: string, taskId: string) => void;
+  onRejectEdit: (editId: string, taskId: string) => void;
+  onRollbackEdit: (editId: string, taskId: string) => void;
 }) {
   const pending = tasks.filter((item) => item.status === "pending").length;
   const running = tasks.filter((item) => item.status === "running").length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
+  const edits = detail?.file_edits ?? [];
 
   return (
     <section className="tasks-page">
@@ -1495,6 +1499,52 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
 
+              {edits.length > 0 && (
+                <div className="source-edit-section">
+                  <div className="artifact-section-head">
+                    <strong>源文件编辑提案</strong>
+                    <span>{edits.length} 个</span>
+                  </div>
+                  <p className="artifact-policy-note">Agent 只能生成提案；只有你点击“确认应用”后，DeskAI 才会再次校验 SHA-256、创建原文件备份并覆盖源文件。</p>
+                  <div className="source-edit-list">
+                    {edits.map((edit) => (
+                      <article className="source-edit-card" key={edit.id}>
+                        <div className="source-edit-head">
+                          <div>
+                            <strong>{edit.filename}</strong>
+                            <span>{edit.kind.toUpperCase()} · {sourceEditStatusLabel(edit.status)}</span>
+                          </div>
+                          <span className={`task-status ${edit.status === "pending" ? "blocked" : edit.status === "applied" ? "completed" : "failed"}`}>
+                            {sourceEditStatusLabel(edit.status)}
+                          </span>
+                        </div>
+                        <p>{edit.summary}</p>
+                        <pre className="edit-diff-preview">{edit.diff_preview || "没有可显示的文本差异预览。"}</pre>
+                        <div className="source-edit-hash">
+                          <small>原 SHA-256 {edit.original_sha256.slice(0, 16)}…</small>
+                          <small>候选 SHA-256 {edit.candidate_sha256.slice(0, 16)}…</small>
+                        </div>
+                        {edit.error_message && <div className="provider-error">{edit.error_message}</div>}
+                        {edit.status === "pending" && (
+                          <div className="button-row">
+                            <button className="primary" disabled={disabled} onClick={() => onConfirmEdit(edit.id, detail.id)}>确认应用</button>
+                            <button className="secondary" disabled={disabled} onClick={() => onRejectEdit(edit.id, detail.id)}>拒绝提案</button>
+                          </div>
+                        )}
+                        {edit.status === "applied" && (
+                          <div className="button-row">
+                            <button className="secondary" disabled={disabled} onClick={() => onRollbackEdit(edit.id, detail.id)}>回滚到修改前</button>
+                            <span className="muted small">{edit.backup_created ? "原文件备份已创建" : "备份状态未知"}</span>
+                          </div>
+                        )}
+                        {edit.status === "rolled_back" && <p className="muted small">已恢复修改前版本。</p>}
+                        {edit.status === "rejected" && <p className="muted small">提案已拒绝，源文件从未被修改。</p>}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {detail.artifacts.length > 0 && (
                 <div className="artifact-section">
                   <div className="artifact-section-head">
@@ -1526,6 +1576,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 <span>运行 {detail.runs.length} 次</span>
                 <span>工具调用 {detail.tool_calls.length} 次</span>
                 <span>生成文件 {detail.artifacts.length} 个</span>
+                <span>源文件提案 {edits.length} 个</span>
                 <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
               </div>
 
@@ -1575,6 +1626,16 @@ function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
       </article>
     </section>
   );
+}
+
+function sourceEditStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "等待确认",
+    applied: "已应用",
+    rejected: "已拒绝",
+    rolled_back: "已回滚",
+  };
+  return labels[status] ?? status;
 }
 
 function taskStatusLabel(status: string) {
