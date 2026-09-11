@@ -107,8 +107,6 @@ class FileOrganizationService:
         snapshot = self._action_snapshot(proposal_id, expected_status="pending")
         source = snapshot["source"]
         target = snapshot["target"]
-        root = snapshot["root"]
-
         self._preflight_move(snapshot, source=source, target=target)
 
         now = datetime.now(timezone.utc)
@@ -210,8 +208,6 @@ class FileOrganizationService:
         snapshot = self._action_snapshot(proposal_id, expected_status="applied")
         current = snapshot["source"]
         original = snapshot["target"]
-        root = snapshot["root"]
-
         applied_sha = snapshot["applied_sha256"]
         if not applied_sha:
             raise ValueError("Applied file organization hash is missing")
