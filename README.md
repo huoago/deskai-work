@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 12 are complete, fully verified, and merged to `main`. Phase 13 controlled file organization is implemented and pending full CI verification.**
+**Phase 0 through Phase 13 are complete, fully verified, and merged to `main`.**
 
 Implemented foundations:
 
@@ -77,7 +77,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 10 — Controlled web research:** complete with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating.
 - **Phase 11 — Confirmed source edits:** complete with staged TXT/MD/DOCX/XLSX source edits, write authorization, explicit confirmation, SHA protection, backup, reindexing, and rollback.
 - **Phase 12 — Transactional multi-file edits:** complete with 2–10 file all-or-nothing edit batches, batch-wide preflight, backup, failure rollback, startup recovery, and Windows verification.
-- **Phase 13 — Controlled file organization:** implemented with proposal-only single-file rename/move, same-root enforcement, extension preservation, no-overwrite semantics, SHA/lock revalidation, same-File-id path updates, rollback, and startup recovery; pending full CI verification.
+- **Phase 13 — Controlled file organization:** complete with proposal-only single-file rename/move, same-root enforcement, extension preservation, no-overwrite semantics, SHA/lock revalidation, same-File-id path updates, rollback, startup recovery, 81 passing Engine tests, packaged Engine 0.13.0 smoke verification, and verified Windows installers.
 
 See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, and `docs/phase13-status.md` for the current implementation.
 
