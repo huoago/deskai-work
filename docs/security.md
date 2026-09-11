@@ -338,3 +338,81 @@ Automatic recovery proceeds only when every member is unambiguous: exactly one o
 If any member is missing, duplicated, altered, unauthorized, or otherwise ambiguous, the batch enters `recovery_required` and DeskAI stops automatic path mutation.
 
 Phase 14 still does not provide file deletion, directory operations, cross-root/cross-Workspace moves, target overwrite, rename swaps/cycles, cross-device moves, unrestricted Python, shell execution, or browser/GUI control.
+
+
+## Controlled recycle-bin boundary
+
+Phase 15 introduces recoverable removal of one Workspace file without introducing a permanent-delete channel.
+
+The Agent receives only `propose_file_recycle`, an L4 staging tool. It can create a proposal only when the user explicitly asks to delete, remove, or recycle one existing Workspace file.
+
+The Agent cannot move, unlink, purge, or permanently delete the source.
+
+Proposal creation requires:
+
+- active Workspace ownership;
+- the source is inside a readable root with `write_allowed=true`;
+- the source is a regular non-symlink file;
+- current on-disk SHA-256 still matches DeskAI's File record;
+- the file is not in an active parser/indexer `processing` job;
+- the file has no active source-edit, organization, or recycle proposal.
+
+A proposal records the original path, original SHA-256, size, previous File status, and a unique private quarantine path under DeskAI's data directory.
+
+### Confirmed recycle
+
+Actual removal from the Workspace is available only through the trusted desktop confirmation API.
+
+Before removal, DeskAI revalidates the source path, Workspace write permission, current SHA-256, parser state, source writeability, and Microsoft Office `~$` lock state.
+
+The recycle sequence is deliberately ordered:
+
+1. copy the source to a unique private quarantine directory;
+2. SHA-256 verify the temporary copy;
+3. atomically finalize the quarantine copy;
+4. verify the finalized quarantine SHA-256;
+5. **recompute the Workspace source SHA-256 again** to detect changes during copying;
+6. only then unlink the exact authorized Workspace source path;
+7. verify the original path is absent and the quarantine copy still matches the original SHA;
+8. mark the existing File row as `recycled`.
+
+The File row keeps its original path, File id, content SHA-256, current FileVersion, chunks, and parsed cache relationships. Hybrid search already requires `File.status == "indexed"`, so a recycled File immediately disappears from retrieval without destroying its version history.
+
+Queued/parser jobs are cancelled when recycle finalizes.
+
+Workspace scanning explicitly preserves the `recycled` state instead of converting the missing original path to generic `deleted`. Authorization reconciliation also preserves recycled metadata so temporarily revoking a root does not destroy restore state.
+
+### Restore
+
+Restore requires the original Workspace root to be readable and writable again.
+
+Before restore:
+
+- the quarantine copy must exist and match the original SHA-256;
+- the original parent directory must exist and be writable;
+- the original path must be absent.
+
+DeskAI copies the quarantine file to a temporary file in the original directory, verifies SHA-256, and then creates the original path using no-overwrite semantics. A concurrently recreated original file is never overwritten.
+
+After successful restore, the same File id is returned to its previous File status and the Workspace is rescanned. The quarantine copy is intentionally retained.
+
+### Interrupted-process recovery
+
+Recycle/restore operations persist `recycling` and `restoring` states before filesystem mutation.
+
+At Engine startup:
+
+- interrupted recycle with the original still intact returns to `pending`; a verified quarantine copy may be retained for retry;
+- interrupted recycle with the original absent and verified quarantine present finalizes as `recycled`;
+- interrupted restore with both a verified original and verified quarantine finalizes as `restored`;
+- interrupted restore before original creation returns to `recycled`.
+
+Unknown/ambiguous hashes or path states enter `recovery_required` and DeskAI stops automatic mutation.
+
+### No permanent deletion in Phase 15
+
+Phase 15 intentionally exposes **no** API or Agent tool that deletes a quarantine copy.
+
+There is no recycle purge endpoint, no retention timer, no scheduled cleanup, and no permanent-delete tool.
+
+A later phase may introduce separately confirmed retention/purge policy, but it must be designed as an independent higher-risk capability rather than reusing the recoverable recycle action.

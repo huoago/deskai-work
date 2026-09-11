@@ -7,6 +7,7 @@ import {
   confirmSourceFileEditBatch,
   confirmFileOrganization,
   confirmFileOrganizationBatch,
+  confirmRecycleProposal,
   createMemory,
   createTask,
   createWorkspace,
@@ -38,12 +39,14 @@ import {
   rejectSourceFileEditBatch,
   rejectFileOrganization,
   rejectFileOrganizationBatch,
+  rejectRecycleProposal,
   retryMemoryQueue,
   retryTask,
   rollbackSourceFileEdit,
   rollbackSourceFileEditBatch,
   rollbackFileOrganization,
   rollbackFileOrganizationBatch,
+  restoreRecycledFile,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -251,7 +254,7 @@ export default function App() {
 
   const activeWorkspace = workspaces.find((item) => item.id === activeWorkspaceId) ?? null;
   const counts = useMemo(() => {
-    const result = { pending: 0, parsed: 0, indexed: 0, unsupported: 0, deleted: 0, failed: 0, revoked: 0 };
+    const result = { pending: 0, parsed: 0, indexed: 0, unsupported: 0, deleted: 0, recycled: 0, failed: 0, revoked: 0 };
     for (const file of files) {
       if (file.status in result) result[file.status as keyof typeof result] += 1;
     }
@@ -838,6 +841,52 @@ export default function App() {
     }
   }
 
+  async function onConfirmRecycle(proposalId: string, taskId: string) {
+    if (!window.confirm("确认将这个文件移入 DeskAI 回收隔离区吗？DeskAI 会先复制并校验 SHA-256，验证成功后才移除工作区原件；隔离副本会保留，可恢复。本阶段不支持永久删除。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await confirmRecycleProposal(proposalId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("文件已安全移入 DeskAI 回收隔离区，隔离副本已保留，可随时恢复。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "回收文件失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRejectRecycle(proposalId: string, taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await rejectRecycleProposal(proposalId);
+      setTaskDetail(await getTask(taskId));
+      setNotice("已拒绝回收提案，原文件未发生变化。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拒绝回收提案失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRestoreRecycledFile(proposalId: string, taskId: string) {
+    if (!window.confirm("确认恢复到原路径吗？DeskAI 会校验隔离副本 SHA-256，并且只有原路径仍为空时才恢复；隔离副本仍会保留。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await restoreRecycledFile(proposalId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("文件已从 DeskAI 回收隔离区恢复到原路径，隔离副本仍保留。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "恢复回收文件失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1054,6 +1103,9 @@ export default function App() {
             onConfirmOrganizationBatch={onConfirmFileOrganizationBatch}
             onRejectOrganizationBatch={onRejectFileOrganizationBatch}
             onRollbackOrganizationBatch={onRollbackFileOrganizationBatch}
+            onConfirmRecycle={onConfirmRecycle}
+            onRejectRecycle={onRejectRecycle}
+            onRestoreRecycle={onRestoreRecycledFile}
           />
         ) : page === "activity" ? (
           <ActivityPage activity={activity} />
@@ -1130,7 +1182,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 14 · AI + 源文件事务 + 批量受控文件整理</span>
+          <span className="phase-chip">Phase 15 · AI + 文件事务 + 可恢复回收站</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1218,7 +1270,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12/13/14 写入边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11–15 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
@@ -1562,7 +1614,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1586,6 +1638,9 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onConfirmOrganizationBatch: (batchId: string, taskId: string) => void;
   onRejectOrganizationBatch: (batchId: string, taskId: string) => void;
   onRollbackOrganizationBatch: (batchId: string, taskId: string) => void;
+  onConfirmRecycle: (proposalId: string, taskId: string) => void;
+  onRejectRecycle: (proposalId: string, taskId: string) => void;
+  onRestoreRecycle: (proposalId: string, taskId: string) => void;
 }) {
   const pending = tasks.filter((item) => item.status === "pending").length;
   const running = tasks.filter((item) => item.status === "running").length;
@@ -1597,6 +1652,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   const fileOperations = detail?.file_operations ?? [];
   const fileOperationBatches = detail?.file_operation_batches ?? [];
   const singleFileOperations = fileOperations.filter((operation) => !operation.batch_id);
+  const recycleProposals = detail?.recycle_proposals ?? [];
 
   return (
     <section className="tasks-page">
@@ -1612,7 +1668,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出单文件或 2–10 文件的受控重命名/同根目录移动事务；所有源文件写入和路径变更都必须由你确认。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出编辑、文件整理及可恢复回收提案；所有源文件写入、路径变更和回收操作都必须由你确认。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1668,6 +1724,59 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
 
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
+
+              {recycleProposals.length > 0 && (
+                <div className="source-edit-section recycle-section">
+                  <div className="artifact-section-head">
+                    <strong>回收站提案</strong>
+                    <span>{recycleProposals.length} 个</span>
+                  </div>
+                  <p className="artifact-policy-note">Phase 15 不执行永久删除。确认后 DeskAI 会先创建并校验私有隔离副本，再移除 Workspace 原件；隔离副本始终保留并支持恢复。</p>
+                  <div className="source-edit-list">
+                    {recycleProposals.map((proposal) => (
+                      <article className="source-edit-card recycle-card" key={proposal.id}>
+                        <div className="source-edit-head">
+                          <div>
+                            <strong>{proposal.filename}</strong>
+                            <span>{recycleStatusLabel(proposal.status)}</span>
+                          </div>
+                          <span className={`task-status ${proposal.status === "pending" ? "blocked" : proposal.status === "recycled" || proposal.status === "restored" ? "completed" : "failed"}`}>
+                            {recycleStatusLabel(proposal.status)}
+                          </span>
+                        </div>
+                        <p>{proposal.summary}</p>
+                        <div className="organization-path-change">
+                          <code>{proposal.original_path}</code>
+                          <span>→</span>
+                          <code>DeskAI 私有回收隔离区</code>
+                        </div>
+                        <div className="source-edit-hash">
+                          <small>SHA-256 {proposal.original_sha256.slice(0, 16)}…</small>
+                          <small>{formatBytes(proposal.original_size)}</small>
+                        </div>
+                        {proposal.error_message && <div className="provider-error">{proposal.error_message}</div>}
+                        {proposal.status === "pending" && (
+                          <div className="button-row">
+                            <button className="primary danger" disabled={disabled} onClick={() => onConfirmRecycle(proposal.id, detail.id)}>确认移入回收站</button>
+                            <button className="secondary" disabled={disabled} onClick={() => onRejectRecycle(proposal.id, detail.id)}>拒绝提案</button>
+                          </div>
+                        )}
+                        {proposal.status === "recycled" && (
+                          <div className="button-row">
+                            <button className="secondary" disabled={disabled} onClick={() => onRestoreRecycle(proposal.id, detail.id)}>恢复到原路径</button>
+                            <span className="muted small">永久删除不可用；隔离副本持续保留。</span>
+                          </div>
+                        )}
+                        {proposal.status === "restored" && <p className="muted small">文件已恢复到原路径；隔离副本仍保留。</p>}
+                        {proposal.status === "rejected" && <p className="muted small">提案已拒绝，原文件从未被移除。</p>}
+                        {proposal.status === "recovery_required" && (
+                          <div className="provider-error">回收状态无法安全自动恢复。DeskAI 已停止继续操作，需要人工核对原路径与隔离副本。</div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {fileOperationBatches.length > 0 && (
                 <div className="source-edit-section batch-transaction-section">
@@ -1923,6 +2032,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 <span>跨文件事务 {batches.length} 个</span>
                 <span>单文件整理 {singleFileOperations.length} 个</span>
                 <span>批量文件整理 {fileOperationBatches.length} 个</span>
+                <span>回收提案 {recycleProposals.length} 个</span>
                 <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
               </div>
 
@@ -1972,6 +2082,19 @@ function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
       </article>
     </section>
   );
+}
+
+function recycleStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "等待确认",
+    recycling: "安全回收中",
+    recycled: "已回收，可恢复",
+    restoring: "恢复中",
+    restored: "已恢复",
+    rejected: "已拒绝",
+    recovery_required: "需要人工恢复",
+  };
+  return labels[status] ?? status;
 }
 
 function fileOrganizationBatchStatusLabel(status: string) {
@@ -2074,6 +2197,16 @@ function activityLabel(action: string) {
     file_organization_batch_startup_recovered: "启动时已恢复中断的批量文件整理",
     file_organization_batch_startup_rollback_completed: "启动时已完成批量路径回滚",
     file_organization_batch_recovery_required: "批量文件整理需要人工恢复",
+    file_recycled: "文件已移入回收隔离区",
+    file_recycle_rejected: "回收提案已拒绝",
+    file_restore_completed: "回收文件已恢复",
+    file_recycle_failed_source_retained: "回收失败，原文件仍保留",
+    file_restore_failed_recycled_retained: "恢复失败，隔离副本仍保留",
+    file_recycle_startup_recovered_pending: "启动时恢复未完成回收",
+    file_recycle_startup_completed: "启动时完成回收状态恢复",
+    file_restore_startup_completed: "启动时完成文件恢复",
+    file_restore_startup_recovered_recycled: "启动时恢复回收状态",
+    file_recycle_recovery_required: "回收状态需要人工恢复",
   };
   return labels[action] ?? action;
 }
@@ -2147,7 +2280,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 14</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 15</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -2167,6 +2300,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> 文件整理不改内容 SHA、不改 File ID、不允许目录操作、跨根移动、扩展名变更或删除</p>
           <p><b>✓</b> Phase 14 支持 2–10 个独立路径操作的 All-or-nothing 批量事务</p>
           <p><b>✓</b> 批量整理要求目标彼此唯一且为空，不支持交换/循环重命名，失败会逆序恢复已移动成员</p>
+          <p><b>✓</b> Phase 15 “删除”只允许进入私有回收隔离区：先复制并 SHA 校验，再移除 Workspace 原件</p>
+          <p><b>✓</b> 回收隔离副本可恢复且不会在 Phase 15 永久清理；没有 purge/unlink 隔离副本的 Agent/API 能力</p>
         </div>
       </article>
     </section>
@@ -2195,6 +2330,7 @@ function statusLabel(status: string) {
     indexed: "已索引",
     unsupported: "暂不支持",
     deleted: "已删除",
+    recycled: "回收站",
     revoked: "已撤权",
     failed: "失败",
   };

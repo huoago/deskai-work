@@ -370,6 +370,39 @@ export type FileOrganizationBatchRecord = {
   operations: FileOrganizationRecord[];
 };
 
+export type FileRecycleRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  file_id: string;
+  filename: string;
+  status:
+    | "pending"
+    | "recycling"
+    | "recycled"
+    | "restoring"
+    | "restored"
+    | "rejected"
+    | "recovery_required"
+    | string;
+  summary: string;
+  original_path: string;
+  quarantine_path: string;
+  original_sha256: string;
+  original_size: number;
+  previous_file_status: string;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  recycled_at: string | null;
+  rejected_at: string | null;
+  restored_at: string | null;
+  requires_user_confirmation: boolean;
+  can_restore: boolean;
+  recovery_required: boolean;
+  permanent_delete_available: boolean;
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
@@ -378,6 +411,7 @@ export type TaskDetail = TaskRecord & {
   file_edit_batches: SourceFileEditBatchRecord[];
   file_operations: FileOrganizationRecord[];
   file_operation_batches: FileOrganizationBatchRecord[];
+  recycle_proposals: FileRecycleRecord[];
 };
 
 export type AgentStatus = {
@@ -708,6 +742,18 @@ export function rejectFileOrganizationBatch(batchId: string): Promise<FileOrgani
 
 export function rollbackFileOrganizationBatch(batchId: string): Promise<FileOrganizationBatchRecord> {
   return request<FileOrganizationBatchRecord>(`/file-operation-batches/${batchId}/rollback`, { method: "POST" });
+}
+
+export function confirmRecycleProposal(proposalId: string): Promise<FileRecycleRecord> {
+  return request<FileRecycleRecord>(`/recycle-proposals/${proposalId}/confirm`, { method: "POST" });
+}
+
+export function rejectRecycleProposal(proposalId: string): Promise<FileRecycleRecord> {
+  return request<FileRecycleRecord>(`/recycle-proposals/${proposalId}/reject`, { method: "POST" });
+}
+
+export function restoreRecycledFile(proposalId: string): Promise<FileRecycleRecord> {
+  return request<FileRecycleRecord>(`/recycle-proposals/${proposalId}/restore`, { method: "POST" });
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {

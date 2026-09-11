@@ -24,6 +24,7 @@ AGENT_TOOL_POLICY: dict[str, tuple[int, bool]] = {
     "propose_source_file_edit_batch": (3, False),
     "propose_file_organization": (3, False),
     "propose_file_organization_batch": (3, False),
+    "propose_file_recycle": (4, False),
 }
 
 

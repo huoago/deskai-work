@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.14.0") {
+  if ([string]$health.version -ne "0.15.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.14.0, got $($health.version)."
+    throw "Expected packaged engine version 0.15.0, got $($health.version)."
   }
 
   try {
@@ -128,6 +128,15 @@ try {
   }
 
   Write-Host "Packaged File Organization Batch endpoint OK: count=$(@($fileOperationBatches).Count)"
+
+  try {
+    $recycleProposals = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/recycle-proposals" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Recycle Bin API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Recycle Bin endpoint OK: count=$(@($recycleProposals).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

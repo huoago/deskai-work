@@ -13,7 +13,9 @@ from app.database.models import (
     AuditLog,
     File,
     FileOrganizationProposal,
+    FileRecycleProposal,
     IndexJob,
+    SourceFileEdit,
     Task,
     WorkspaceRoot,
 )
@@ -800,9 +802,23 @@ class FileOrganizationService:
                     FileOrganizationProposal.status.in_(BUSY_OPERATION_STATUSES),
                 )
             )
-        if active:
+            edit = session.scalar(
+                select(SourceFileEdit.id).where(
+                    SourceFileEdit.file_id == file_id,
+                    SourceFileEdit.status.in_(BUSY_OPERATION_STATUSES),
+                )
+            )
+            recycle = session.scalar(
+                select(FileRecycleProposal.id).where(
+                    FileRecycleProposal.file_id == file_id,
+                    FileRecycleProposal.status.in_(
+                        {"pending", "recycling", "restoring", "recovery_required"}
+                    ),
+                )
+            )
+        if active or edit or recycle:
             raise ValueError(
-                "This file already has an active organization proposal"
+                "This file already has an active edit, organization, or recycle proposal"
             )
 
     @staticmethod
