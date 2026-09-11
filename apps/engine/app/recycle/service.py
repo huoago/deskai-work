@@ -54,6 +54,7 @@ class FileRecycleService:
         workspace_id: str,
         file_id: str,
         summary: str,
+        batch_id: str | None = None,
     ) -> dict[str, Any]:
         file, _root, source = self.source_edit_service._editable_file(
             task_id=task_id,
@@ -78,6 +79,7 @@ class FileRecycleService:
             task_id=task_id,
             workspace_id=workspace_id,
             file_id=file_id,
+            batch_id=batch_id,
             status="pending",
             summary=str(summary or "").strip()[:1000]
             or f"Recycle {file.filename}",
@@ -94,6 +96,7 @@ class FileRecycleService:
         return self.payload(proposal, filename=file.filename)
 
     def confirm(self, proposal_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(proposal_id)
         snapshot = self._snapshot_for_recycle(proposal_id)
         source = snapshot["source"]
         quarantine = snapshot["quarantine"]
@@ -162,6 +165,7 @@ class FileRecycleService:
         return self.get(proposal_id)
 
     def reject(self, proposal_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(proposal_id)
         now = datetime.now(timezone.utc)
         with self.database.session() as session:
             proposal = session.get(FileRecycleProposal, proposal_id)
@@ -184,6 +188,7 @@ class FileRecycleService:
         return self.get(proposal_id)
 
     def restore(self, proposal_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(proposal_id)
         snapshot = self._snapshot_for_restore(proposal_id)
         original = snapshot["original"]
         quarantine = snapshot["quarantine"]
@@ -245,7 +250,8 @@ class FileRecycleService:
                 item.id
                 for item in session.scalars(
                     select(FileRecycleProposal).where(
-                        FileRecycleProposal.status.in_(["recycling", "restoring"])
+                        FileRecycleProposal.batch_id.is_(None),
+                        FileRecycleProposal.status.in_(["recycling", "restoring"]),
                     )
                 ).all()
             ]
@@ -407,6 +413,7 @@ class FileRecycleService:
             "task_id": proposal.task_id,
             "workspace_id": proposal.workspace_id,
             "file_id": proposal.file_id,
+            "batch_id": proposal.batch_id,
             "filename": filename,
             "status": proposal.status,
             "summary": proposal.summary,
@@ -477,6 +484,7 @@ class FileRecycleService:
                 "task_id": proposal.task_id,
                 "workspace_id": proposal.workspace_id,
                 "file_id": proposal.file_id,
+                "batch_id": proposal.batch_id,
                 "source": source,
                 "original": source,
                 "quarantine": self._assert_quarantine_path(
@@ -515,6 +523,7 @@ class FileRecycleService:
                 "task_id": proposal.task_id,
                 "workspace_id": proposal.workspace_id,
                 "file_id": proposal.file_id,
+                "batch_id": proposal.batch_id,
                 "original": original,
                 "quarantine": self._require_quarantine_path(proposal.quarantine_path),
                 "original_sha256": proposal.original_sha256,
@@ -723,6 +732,17 @@ class FileRecycleService:
             raise ValueError(
                 "File is currently being parsed/indexed; wait until processing finishes"
             )
+
+    def _ensure_individual_action(self, proposal_id: str) -> None:
+        with self.database.session() as session:
+            proposal = session.get(FileRecycleProposal, proposal_id)
+            if proposal is None:
+                raise ValueError("Recycle proposal not found")
+            if proposal.batch_id:
+                raise ValueError(
+                    "This recycle proposal belongs to a transactional batch "
+                    "and must be acted on through the batch"
+                )
 
     def _ensure_no_conflicting_proposals(self, file_id: str) -> None:
         with self.database.session() as session:
