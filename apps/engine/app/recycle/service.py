@@ -844,15 +844,25 @@ class FileRecycleService:
         expected_sha: str,
     ) -> None:
         temp = original.parent / f".deskai-restore-{uuid.uuid4().hex}.tmp"
+        created_original = False
         try:
             shutil.copy2(quarantine, temp)
             if sha256_file(temp) != expected_sha:
                 raise ValueError("Temporary restore copy failed SHA-256 verification")
             self._rename_no_overwrite(temp, original)
+            created_original = True
             if not original.is_file() or original.is_symlink():
                 raise ValueError("Restored original file is missing")
             if sha256_file(original) != expected_sha:
                 raise ValueError("Restored original file failed SHA-256 verification")
+        except Exception:
+            if created_original and original.is_file() and not original.is_symlink():
+                try:
+                    if sha256_file(original) == expected_sha:
+                        original.unlink()
+                except OSError:
+                    pass
+            raise
         finally:
             temp.unlink(missing_ok=True)
 
