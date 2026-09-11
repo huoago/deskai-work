@@ -41,6 +41,7 @@ class ToolRegistry:
         source_edit_service,
         source_edit_batch_service,
         file_organization_service,
+        file_organization_batch_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
@@ -52,6 +53,7 @@ class ToolRegistry:
         self.source_edit_service = source_edit_service
         self.source_edit_batch_service = source_edit_batch_service
         self.file_organization_service = file_organization_service
+        self.file_organization_batch_service = file_organization_batch_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -72,6 +74,7 @@ class ToolRegistry:
             "propose_source_file_edit": self._propose_source_file_edit,
             "propose_source_file_edit_batch": self._propose_source_file_edit_batch,
             "propose_file_organization": self._propose_file_organization,
+            "propose_file_organization_batch": self._propose_file_organization_batch,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -486,6 +489,22 @@ class ToolRegistry:
             summary=str(arguments.get("summary") or ""),
             new_name=str(arguments.get("new_name") or ""),
             target_relative_dir=str(arguments.get("target_relative_dir") or ""),
+        )
+
+    def _propose_file_organization_batch(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        operations = arguments.get("operations") or []
+        if not isinstance(operations, list):
+            raise ValueError("operations must be a list")
+        return self.file_organization_batch_service.propose(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            summary=str(arguments.get("summary") or ""),
+            operations=operations,
         )
 
     def _aggregate_table(
@@ -936,6 +955,64 @@ def _tool_specs() -> list[ToolSpec]:
                     "new_name",
                     "target_relative_dir",
                 ],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="propose_file_organization_batch",
+            description=(
+                "Stage one transactional batch of 2-10 independent file rename/move "
+                "operations. This tool NEVER changes paths. Every operation remains "
+                "inside the same authorized writable root as its source, preserves "
+                "extensions for rename, requires non-existing unique targets, and the "
+                "whole batch must be confirmed once in the desktop UI."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                    },
+                    "operations": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file_id": {"type": "string", "minLength": 1},
+                                "operation": {
+                                    "type": "string",
+                                    "enum": ["rename", "move"],
+                                },
+                                "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 1000,
+                                },
+                                "new_name": {
+                                    "type": "string",
+                                    "maxLength": 240,
+                                },
+                                "target_relative_dir": {
+                                    "type": "string",
+                                    "maxLength": 1000,
+                                },
+                            },
+                            "required": [
+                                "file_id",
+                                "operation",
+                                "summary",
+                                "new_name",
+                                "target_relative_dir",
+                            ],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["summary", "operations"],
                 "additionalProperties": False,
             },
         ),

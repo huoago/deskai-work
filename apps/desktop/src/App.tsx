@@ -6,6 +6,7 @@ import {
   confirmSourceFileEdit,
   confirmSourceFileEditBatch,
   confirmFileOrganization,
+  confirmFileOrganizationBatch,
   createMemory,
   createTask,
   createWorkspace,
@@ -36,11 +37,13 @@ import {
   rejectSourceFileEdit,
   rejectSourceFileEditBatch,
   rejectFileOrganization,
+  rejectFileOrganizationBatch,
   retryMemoryQueue,
   retryTask,
   rollbackSourceFileEdit,
   rollbackSourceFileEditBatch,
   rollbackFileOrganization,
+  rollbackFileOrganizationBatch,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -789,6 +792,52 @@ export default function App() {
     }
   }
 
+  async function onConfirmFileOrganizationBatch(batchId: string, taskId: string) {
+    if (!window.confirm("确认一次性执行这一组文件路径变更吗？DeskAI 会先预检全部成员；任何一项失败都会恢复此前已经移动的文件。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await confirmFileOrganizationBatch(batchId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("批量文件整理事务已全部应用，所有 File ID 与内容 SHA 保持不变。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "应用批量文件整理事务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRejectFileOrganizationBatch(batchId: string, taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await rejectFileOrganizationBatch(batchId);
+      setTaskDetail(await getTask(taskId));
+      setNotice("已拒绝整个批量文件整理事务，所有文件路径均未变化。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拒绝批量文件整理事务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRollbackFileOrganizationBatch(batchId: string, taskId: string) {
+    if (!window.confirm("确认整体恢复这一组文件的原路径吗？DeskAI 会先确认全部成员内容未变化且所有原路径仍为空闲。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await rollbackFileOrganizationBatch(batchId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("批量文件整理事务已整体回滚，全部成员恢复到原路径。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "回滚批量文件整理事务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1002,6 +1051,9 @@ export default function App() {
             onConfirmOrganization={onConfirmFileOrganization}
             onRejectOrganization={onRejectFileOrganization}
             onRollbackOrganization={onRollbackFileOrganization}
+            onConfirmOrganizationBatch={onConfirmFileOrganizationBatch}
+            onRejectOrganizationBatch={onRejectFileOrganizationBatch}
+            onRollbackOrganizationBatch={onRollbackFileOrganizationBatch}
           />
         ) : page === "activity" ? (
           <ActivityPage activity={activity} />
@@ -1078,7 +1130,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 13 · AI + 源文件事务 + 受控文件整理</span>
+          <span className="phase-chip">Phase 14 · AI + 源文件事务 + 批量受控文件整理</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1166,7 +1218,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12/13 写入边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12/13/14 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
@@ -1510,7 +1562,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1531,6 +1583,9 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onConfirmOrganization: (proposalId: string, taskId: string) => void;
   onRejectOrganization: (proposalId: string, taskId: string) => void;
   onRollbackOrganization: (proposalId: string, taskId: string) => void;
+  onConfirmOrganizationBatch: (batchId: string, taskId: string) => void;
+  onRejectOrganizationBatch: (batchId: string, taskId: string) => void;
+  onRollbackOrganizationBatch: (batchId: string, taskId: string) => void;
 }) {
   const pending = tasks.filter((item) => item.status === "pending").length;
   const running = tasks.filter((item) => item.status === "running").length;
@@ -1540,6 +1595,8 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   const batches = detail?.file_edit_batches ?? [];
   const singleEdits = edits.filter((edit) => !edit.batch_id);
   const fileOperations = detail?.file_operations ?? [];
+  const fileOperationBatches = detail?.file_operation_batches ?? [];
+  const singleFileOperations = fileOperations.filter((operation) => !operation.batch_id);
 
   return (
     <section className="tasks-page">
@@ -1555,7 +1612,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出受控重命名/同根目录移动方案；所有源文件写入和路径变更都必须由你确认。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出单文件或 2–10 文件的受控重命名/同根目录移动事务；所有源文件写入和路径变更都必须由你确认。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1612,15 +1669,77 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
 
-              {fileOperations.length > 0 && (
+              {fileOperationBatches.length > 0 && (
+                <div className="source-edit-section batch-transaction-section">
+                  <div className="artifact-section-head">
+                    <strong>批量文件整理事务</strong>
+                    <span>{fileOperationBatches.length} 个事务</span>
+                  </div>
+                  <p className="artifact-policy-note">每个事务包含 2–10 个独立重命名/移动操作；全部目标必须唯一且为空。事务成员不能单独确认，任何成员失败都会恢复此前已经移动的文件。</p>
+                  <div className="source-edit-list">
+                    {fileOperationBatches.map((batch) => (
+                      <article className="source-edit-card batch-transaction-card" key={batch.id}>
+                        <div className="source-edit-head">
+                          <div>
+                            <strong>{batch.summary}</strong>
+                            <span>{batch.operation_count} 个路径操作 · All-or-nothing · {fileOrganizationBatchStatusLabel(batch.status)}</span>
+                          </div>
+                          <span className={`task-status ${batch.status === "pending" ? "blocked" : batch.status === "applied" || batch.status === "rolled_back" ? "completed" : "failed"}`}>
+                            {fileOrganizationBatchStatusLabel(batch.status)}
+                          </span>
+                        </div>
+                        <div className="batch-member-list">
+                          {batch.operations.map((operation) => (
+                            <div className="batch-member" key={operation.id}>
+                              <div>
+                                <strong>{operation.operation === "rename" ? "重命名" : "移动"} · {operation.filename}</strong>
+                                <span>{operation.summary}</span>
+                              </div>
+                              <div className="organization-path-change">
+                                <code>{operation.original_path}</code>
+                                <span>→</span>
+                                <code>{operation.target_path}</code>
+                              </div>
+                              <div className="source-edit-hash">
+                                <small>SHA-256 {operation.original_sha256.slice(0, 16)}…</small>
+                                <small>File ID {operation.file_id.slice(0, 8)}…</small>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {batch.error_message && <div className="provider-error">{batch.error_message}</div>}
+                        {batch.status === "pending" && (
+                          <div className="button-row">
+                            <button className="primary" disabled={disabled} onClick={() => onConfirmOrganizationBatch(batch.id, detail.id)}>确认整批路径变更</button>
+                            <button className="secondary" disabled={disabled} onClick={() => onRejectOrganizationBatch(batch.id, detail.id)}>拒绝整批</button>
+                          </div>
+                        )}
+                        {batch.status === "applied" && (
+                          <div className="button-row">
+                            <button className="secondary" disabled={disabled} onClick={() => onRollbackOrganizationBatch(batch.id, detail.id)}>整体恢复原路径</button>
+                            <span className="muted small">所有成员 File ID 与内容 SHA 保持不变。</span>
+                          </div>
+                        )}
+                        {batch.status === "recovery_required" && (
+                          <div className="provider-error">批量路径状态无法安全自动恢复。DeskAI 已停止继续操作，需要人工核对全部成员。</div>
+                        )}
+                        {batch.status === "rolled_back" && <p className="muted small">整批文件已恢复到原路径。</p>}
+                        {batch.status === "rejected" && <p className="muted small">整批提案已拒绝，所有文件路径从未改变。</p>}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {singleFileOperations.length > 0 && (
                 <div className="source-edit-section file-organization-section">
                   <div className="artifact-section-head">
                     <strong>文件整理提案</strong>
-                    <span>{fileOperations.length} 个</span>
+                    <span>{singleFileOperations.length} 个</span>
                   </div>
                   <p className="artifact-policy-note">Agent 只能提出单文件重命名/移动方案；路径变更必须人工确认，且目标不得存在、不得跨 Workspace 根目录、不得改变文件扩展名。</p>
                   <div className="source-edit-list">
-                    {fileOperations.map((operation) => (
+                    {singleFileOperations.map((operation) => (
                       <article className="source-edit-card file-organization-card" key={operation.id}>
                         <div className="source-edit-head">
                           <div>
@@ -1802,7 +1921,8 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 <span>生成文件 {detail.artifacts.length} 个</span>
                 <span>单文件提案 {singleEdits.length} 个</span>
                 <span>跨文件事务 {batches.length} 个</span>
-                <span>文件整理 {fileOperations.length} 个</span>
+                <span>单文件整理 {singleFileOperations.length} 个</span>
+                <span>批量文件整理 {fileOperationBatches.length} 个</span>
                 <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
               </div>
 
@@ -1852,6 +1972,19 @@ function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
       </article>
     </section>
   );
+}
+
+function fileOrganizationBatchStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "等待整批确认",
+    applying: "整批路径变更中",
+    applied: "整批已应用",
+    rolling_back: "整体恢复原路径中",
+    rolled_back: "整批已恢复",
+    rejected: "整批已拒绝",
+    recovery_required: "需要人工恢复",
+  };
+  return labels[status] ?? status;
 }
 
 function fileOrganizationStatusLabel(status: string) {
@@ -1933,6 +2066,14 @@ function activityLabel(action: string) {
     file_organization_startup_recovered_applied: "启动时恢复已应用路径状态",
     file_organization_startup_completed_rollback: "启动时完成路径回滚",
     file_organization_recovery_required: "文件路径状态需要人工恢复",
+    file_organization_batch_applied: "批量文件整理已应用",
+    file_organization_batch_rejected: "批量文件整理已拒绝",
+    file_organization_batch_rolled_back: "批量文件整理已回滚",
+    file_organization_batch_apply_failed_restored: "批量文件整理失败并已恢复",
+    file_organization_batch_rollback_failed_reapplied: "批量路径回滚失败并已恢复应用态",
+    file_organization_batch_startup_recovered: "启动时已恢复中断的批量文件整理",
+    file_organization_batch_startup_rollback_completed: "启动时已完成批量路径回滚",
+    file_organization_batch_recovery_required: "批量文件整理需要人工恢复",
   };
   return labels[action] ?? action;
 }
@@ -2006,7 +2147,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 13</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 14</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -2024,6 +2165,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Engine 启动会恢复中断的 applying/rolling_back 事务；无法安全判断时进入 recovery_required</p>
           <p><b>✓</b> Phase 13 重命名/移动只能在同一授权可写根目录内执行，目标不得已存在</p>
           <p><b>✓</b> 文件整理不改内容 SHA、不改 File ID、不允许目录操作、跨根移动、扩展名变更或删除</p>
+          <p><b>✓</b> Phase 14 支持 2–10 个独立路径操作的 All-or-nothing 批量事务</p>
+          <p><b>✓</b> 批量整理要求目标彼此唯一且为空，不支持交换/循环重命名，失败会逆序恢复已移动成员</p>
         </div>
       </article>
     </section>

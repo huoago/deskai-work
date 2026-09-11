@@ -280,3 +280,61 @@ Phase 13 still does **not** provide:
 - extension-changing renames;
 - unattended Agent path mutation;
 - shell, unrestricted Python, or GUI/browser control.
+
+
+## Transactional file organization boundary
+
+Phase 14 extends Phase 13 path changes into a coordinated batch of 2–10 independent file operations.
+
+The Agent receives `propose_file_organization_batch`, an L3 staging tool. It creates only a batch record plus Phase 13 member proposals. It cannot change paths.
+
+Every member independently inherits the Phase 13 boundary:
+
+- active Workspace ownership;
+- readable and writable authorized root;
+- regular non-symlink source file;
+- current SHA-256 matches DeskAI's File record;
+- rename preserves the extension and uses a Windows-compatible filename;
+- move stays inside an existing directory of the same writable root;
+- no target overwrite;
+- same-device path movement only.
+
+The batch additionally requires:
+
+- 2–10 unique File ids;
+- unique target paths;
+- no target may equal another batch member's current source path;
+- no swap/cycle semantics;
+- no duplicate members.
+
+Before the first path mutation, confirmation preflights **every** member. If one member is stale, locked, being processed, unauthorized, unwritable, or has a target collision, no member is moved.
+
+After preflight, the batch enters `applying` and every member enters `applying`.
+
+DeskAI then applies member path changes sequentially using Phase 13 no-overwrite semantics. If any operation or verification fails, all already-moved members are restored to their original paths in reverse order.
+
+A completely restored failure returns the entire batch to `pending`. If automatic restoration is incomplete, the batch and in-flight members become `recovery_required`.
+
+Single-file confirm/reject/rollback APIs reject Phase 14 batch members; they can only be acted on through the batch API.
+
+### Batch rollback
+
+Rollback preflights the complete batch before moving any member.
+
+Every currently applied file must still have the exact SHA-256 recorded by DeskAI and every original path must be unoccupied.
+
+If a rollback fails after some files have been restored, DeskAI attempts to reapply those members to the Phase 14 target paths so the batch returns to its previous applied state.
+
+### Interrupted-process recovery
+
+Engine startup recovers Phase 14 batches before Phase 13 individual operations.
+
+For an interrupted `applying` batch, any members already at target paths are moved back to their original paths. The fully restored batch returns to `pending`.
+
+For an interrupted `rolling_back` batch, remaining target-path members are restored to originals and the batch is finalized as `rolled_back`.
+
+Automatic recovery proceeds only when every member is unambiguous: exactly one of its original/target paths contains the expected SHA-256.
+
+If any member is missing, duplicated, altered, unauthorized, or otherwise ambiguous, the batch enters `recovery_required` and DeskAI stops automatic path mutation.
+
+Phase 14 still does not provide file deletion, directory operations, cross-root/cross-Workspace moves, target overwrite, rename swaps/cycles, cross-device moves, unrestricted Python, shell execution, or browser/GUI control.

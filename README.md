@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 13 are complete, fully verified, and merged to `main`.**
+**Phase 0 through Phase 13 are complete, fully verified, and merged to `main`. Phase 14 transactional file organization is implemented and pending full CI verification.**
 
 Implemented foundations:
 
@@ -58,9 +58,10 @@ Implemented foundations:
 - batch-wide SHA/write/lock preflight, backups, failure rollback, and startup recovery
 - staged single-file rename/move proposals inside the same authorized writable Workspace root
 - no-overwrite target checks, SHA revalidation, Office lock checks, path rollback, and startup recovery for file organization
+- 2–10 file transactional organization batches with one-shot confirmation, all-member preflight, failure rollback, and startup recovery
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, stage coordinated 2–10 file all-or-nothing edit transactions, and stage confirmed single-file rename/move operations inside one authorized writable Workspace root. Source content or paths are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, no-overwrite rules, rollback safeguards, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, file deletion, directory operations, cross-root moves, target overwrite, or unattended destructive file operations.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, stage coordinated 2–10 file all-or-nothing edit transactions, stage confirmed single-file rename/move operations inside one authorized writable Workspace root, and stage 2–10 file all-or-nothing organization transactions. Source content or paths are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, no-overwrite rules, rollback safeguards, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, file deletion, directory operations, cross-root moves, target overwrite, or unattended destructive file operations.
 
 ## V1 phase boundaries
 
@@ -78,8 +79,9 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 11 — Confirmed source edits:** complete with staged TXT/MD/DOCX/XLSX source edits, write authorization, explicit confirmation, SHA protection, backup, reindexing, and rollback.
 - **Phase 12 — Transactional multi-file edits:** complete with 2–10 file all-or-nothing edit batches, batch-wide preflight, backup, failure rollback, startup recovery, and Windows verification.
 - **Phase 13 — Controlled file organization:** complete with proposal-only single-file rename/move, same-root enforcement, extension preservation, no-overwrite semantics, SHA/lock revalidation, same-File-id path updates, rollback, startup recovery, 81 passing Engine tests, packaged Engine 0.13.0 smoke verification, and verified Windows installers.
+- **Phase 14 — Transactional file organization:** implemented with 2–10 independent rename/move proposals, unique absent targets, all-member preflight, single-confirm all-or-nothing execution, failure rollback, batch startup recovery, and batch rollback; pending full CI verification.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, and `docs/phase13-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, and `docs/phase14-status.md` for the current implementation.
 
 ## Repository layout
 
