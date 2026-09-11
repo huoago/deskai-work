@@ -128,10 +128,30 @@ class FileOrganizationService:
                 expected_sha=snapshot["original_sha256"],
             )
         except Exception as exc:
-            self._reset_pending(
-                proposal_id,
-                f"File organization apply failed before completion: {type(exc).__name__}: {exc}",
-            )
+            try:
+                if target.is_file() and not source.exists():
+                    self._move_no_overwrite(target, source)
+                    self._verify_moved(
+                        source=target,
+                        target=source,
+                        expected_sha=snapshot["original_sha256"],
+                    )
+                self._reset_pending(
+                    proposal_id,
+                    (
+                        "File organization apply failed before completion; "
+                        f"original path is intact: {type(exc).__name__}: {exc}"
+                    ),
+                )
+            except Exception as recovery_exc:
+                self._mark_recovery_required(
+                    proposal_id,
+                    (
+                        "File organization apply failed and the original path could not "
+                        f"be safely restored: {type(exc).__name__}: {exc}; "
+                        f"recovery={type(recovery_exc).__name__}: {recovery_exc}"
+                    ),
+                )
             raise ValueError(f"File organization apply failed: {exc}") from exc
 
         try:
@@ -222,10 +242,30 @@ class FileOrganizationService:
                 expected_sha=snapshot["original_sha256"],
             )
         except Exception as exc:
-            self._reset_applied(
-                proposal_id,
-                f"File organization rollback failed before completion: {type(exc).__name__}: {exc}",
-            )
+            try:
+                if original.is_file() and not current.exists():
+                    self._move_no_overwrite(original, current)
+                    self._verify_moved(
+                        source=original,
+                        target=current,
+                        expected_sha=snapshot["original_sha256"],
+                    )
+                self._reset_applied(
+                    proposal_id,
+                    (
+                        "File organization rollback failed before completion; "
+                        f"applied path is intact: {type(exc).__name__}: {exc}"
+                    ),
+                )
+            except Exception as recovery_exc:
+                self._mark_recovery_required(
+                    proposal_id,
+                    (
+                        "File organization rollback failed and the applied path could not "
+                        f"be safely restored: {type(exc).__name__}: {exc}; "
+                        f"recovery={type(recovery_exc).__name__}: {recovery_exc}"
+                    ),
+                )
             raise ValueError(f"File organization rollback failed: {exc}") from exc
 
         try:
@@ -763,8 +803,8 @@ class FileOrganizationService:
             raise ValueError("New filename contains Windows-incompatible characters")
         if any(char in INVALID_FILENAME_CHARS for char in value):
             raise ValueError("New filename contains Windows-incompatible characters")
-        stem = Path(value).stem.upper()
-        if stem in WINDOWS_RESERVED_NAMES:
+        reserved_base = value.split(".", 1)[0].upper()
+        if reserved_base in WINDOWS_RESERVED_NAMES:
             raise ValueError("New filename is reserved by Windows")
         if Path(value).suffix.lower() != expected_suffix.lower():
             raise ValueError("Phase 13 rename must preserve the file extension")
