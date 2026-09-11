@@ -136,6 +136,7 @@ def test_phase18_hash_mismatch_is_classified_without_force_action(
         entry_id="hash-edit",
         error_message="Rollback hash verification failed for notes.md",
     )
+    edit.pop("recovery_required")
     edit.update(
         {
             "batch_id": None,
@@ -149,6 +150,7 @@ def test_phase18_hash_mismatch_is_classified_without_force_action(
     diagnostic = item["diagnostic"]
 
     assert diagnostic["code"] == "hash_mismatch"
+    assert item["recovery_required"] is True
     assert item["action"] is None
     assert any("SHA-256" in step for step in diagnostic["guided_checks"])
     assert any("force overwrite" in step for step in diagnostic["prohibited_actions"])
