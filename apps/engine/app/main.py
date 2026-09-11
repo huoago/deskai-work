@@ -15,7 +15,11 @@ from app.api.memory import router as memory_router
 from app.api.providers import router as providers_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
+from app.api.tasks import router as tasks_router
 from app.api.workspaces import router as workspace_router
+from app.agent.orchestrator import AgentOrchestrator
+from app.agent.tools import ToolRegistry
+from app.agent.worker import AgentWorker
 from app.ai.provider import OpenAIChatProvider
 from app.core.config import Settings
 from app.database.migrate import run_migrations
@@ -80,6 +84,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             interval_seconds=resolved.memory_worker_interval_seconds,
         )
         app.state.memory_worker = memory_worker
+        tool_registry = ToolRegistry(
+            app.state.database,
+            app.state.hybrid_search,
+            memory_service,
+            parser_worker.cache,
+        )
+        app.state.tool_registry = tool_registry
+        agent_orchestrator = AgentOrchestrator(
+            app.state.database,
+            app.state.secret_store,
+            app.state.openai_provider,
+            tool_registry,
+        )
+        app.state.agent_orchestrator = agent_orchestrator
+        agent_worker = AgentWorker(
+            app.state.database,
+            agent_orchestrator,
+            interval_seconds=resolved.agent_worker_interval_seconds,
+        )
+        app.state.agent_worker = agent_worker
         if resolved.watcher_enabled:
             watcher.start()
         if resolved.parser_worker_enabled:
@@ -88,9 +112,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             knowledge_indexer.start()
         if resolved.memory_worker_enabled:
             memory_worker.start()
+        if resolved.agent_worker_enabled:
+            agent_worker.start()
         try:
             yield
         finally:
+            agent_worker.stop()
             memory_worker.stop()
             knowledge_indexer.stop()
             parser_worker.stop()
@@ -99,7 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.6.0",
+        version="0.7.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -138,4 +165,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(providers_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
+    app.include_router(tasks_router)
     return app
