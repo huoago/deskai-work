@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.database.models import Permission
 from app.database.session import Database
@@ -47,7 +47,10 @@ class PermissionGate:
                 session.scalars(
                     select(Permission).where(
                         Permission.capability == capability,
-                        Permission.workspace_id.in_([workspace_id, None]),
+                        or_(
+                            Permission.workspace_id == workspace_id,
+                            Permission.workspace_id.is_(None),
+                        ),
                     )
                 ).all()
             )
