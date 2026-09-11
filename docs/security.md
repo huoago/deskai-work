@@ -97,3 +97,24 @@ Expression size, AST complexity, numeric constants, and exponent magnitude are b
 Tabular tools never receive a local path. They receive a DeskAI File id, validate that the File belongs to the active Workspace, require a current parsed/indexed FileVersion, restrict file types to CSV/XLSX, and read only the local parsed-document cache.
 
 Phase 9 therefore does not weaken the existing Workspace filesystem authorization model and must not be treated as permission to run arbitrary code.
+
+
+## Controlled web research boundary
+
+Phase 10 adds read-only public web research through the configured OpenAI Responses provider.
+
+The Agent receives a single registered `search_web` function tool. The local WebResearchService validates and bounds the search query, refuses credential-like secret material, requires a configured provider credential, and refuses to run when Privacy Mode is `local`.
+
+The provider call exposes only OpenAI's hosted `web_search` tool. DeskAI requests `web_search_call.action.sources` and returns a bounded source list with title and URL so the Agent can ground its final answer.
+
+Phase 10 does **not** add:
+
+- arbitrary URL fetch/open capabilities;
+- file downloads;
+- browser or GUI control;
+- webpage form submission;
+- code, shell, or subprocess execution;
+- access to local files through the web tool;
+- permission changes based on webpage instructions.
+
+Web pages and search results remain untrusted data. Retrieved web content cannot override DeskAI system policy, Tool Registry policy, Workspace permissions, or confirmation requirements.
