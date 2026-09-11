@@ -1,6 +1,6 @@
 # Phase 15 — Controlled recycle bin
 
-Status: implemented on the Phase 15 branch and pending full CI verification.
+Status: complete, verified by full CI, and merged to `main`.
 
 ## Objective
 
@@ -62,6 +62,8 @@ The source SHA is recomputed **after quarantine preparation and immediately befo
 
 If quarantine preparation or verification fails, the source remains.
 
+The private recycle sandbox is also containment-checked: the recycle root itself may not be a symlink, resolved quarantine paths must remain inside DeskAI's private data directory, and quarantine files may not be symlinks.
+
 ## Restore safety
 
 Restore requires:
@@ -111,14 +113,33 @@ Phase 15 tests cover:
 - Agent can only stage a recoverable proposal;
 - permanent-delete API is absent.
 
-Required CI gates:
+### Merge verification
 
-- Ruff;
-- full Engine Pytest suite;
-- TypeScript typecheck;
-- Vite production build;
-- Windows PyInstaller sidecar;
-- packaged Engine 0.15.0 smoke;
-- packaged `/recycle-proposals` API smoke;
-- Tauri NSIS/MSI;
-- Windows Artifact upload.
+Feature PR #22 passed the complete CI pipeline on Run #78 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **102 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.15.0** health smoke — passed;
+- packaged `/recycle-proposals` API smoke — passed;
+- Tauri NSIS build — passed;
+- Tauri MSI build — passed;
+- Windows Artifact upload — passed.
+
+Verified Windows installers:
+
+- `DeskAI Work_0.1.0_x64-setup.exe`;
+- `DeskAI Work_0.1.0_x64_en-US.msi`.
+
+Feature PR #22 was squash merged to `main` as commit:
+
+`66a0edeeb022e32fa9847bfeef38c32e0f6667c5`
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10279545058`;
+- size: `394311515` bytes;
+- SHA-256: `16e8714bc104c13157b3fda96581fcc7afea5a6931b8cc4efae6d3d766b8643e`.

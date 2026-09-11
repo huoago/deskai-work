@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 14 are complete, fully verified, and merged to `main`. Phase 15 controlled recycle bin is implemented and pending full CI verification.**
+**Phase 0 through Phase 15 are complete, fully verified, and merged to `main`.**
 
 Implemented foundations:
 
@@ -82,7 +82,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 12 — Transactional multi-file edits:** complete with 2–10 file all-or-nothing edit batches, batch-wide preflight, backup, failure rollback, startup recovery, and Windows verification.
 - **Phase 13 — Controlled file organization:** complete with proposal-only single-file rename/move, same-root enforcement, extension preservation, no-overwrite semantics, SHA/lock revalidation, same-File-id path updates, rollback, startup recovery, 81 passing Engine tests, packaged Engine 0.13.0 smoke verification, and verified Windows installers.
 - **Phase 14 — Transactional file organization:** complete with 2–10 independent rename/move proposals, unique absent targets, all-member preflight, single-confirm all-or-nothing execution, failure rollback, batch startup recovery, batch rollback, 90 passing Engine tests, packaged Engine 0.14.0 smoke verification, and verified Windows installers.
-- **Phase 15 — Controlled recycle bin:** implemented with proposal-only single-file recycle, verified private quarantine copy before source removal, recycled metadata state, restore-to-original with no-overwrite semantics, startup recovery, and no permanent purge capability; pending full CI verification.
+- **Phase 15 — Controlled recycle bin:** complete with proposal-only single-file recycle, verified private quarantine copy before source removal, post-copy source SHA revalidation, quarantine sandbox containment, recycled metadata state, restore-to-original with no-overwrite semantics, startup recovery, cross-tool mutation exclusivity, no permanent purge capability, 102 passing Engine tests, packaged Engine 0.15.0 smoke verification, and verified Windows installers.
 
 See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, and `docs/phase15-status.md` for the current implementation.
 
