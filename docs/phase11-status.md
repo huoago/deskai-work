@@ -1,6 +1,6 @@
 # Phase 11 — Confirmed source-file editing
 
-Status: implemented on the Phase 11 branch and pending full CI verification.
+Status: complete, verified by full CI, and merged to `main`.
 
 ## Objective
 
@@ -139,3 +139,21 @@ Required CI gates:
 ## Phase boundary
 
 Phase 11 does not add file deletion, move/rename, arbitrary destination writes, browser/computer control, shell commands, or unrestricted Python execution.
+
+
+## Merge verification
+
+Phase 11 was merged through PR #14 after CI Run #58 passed all gates:
+
+- desktop TypeScript typecheck: passed;
+- Vite production build: passed;
+- Ruff: passed;
+- Engine Pytest: 64 passed;
+- Windows PyInstaller sidecar: passed;
+- packaged Engine health: 0.11.0;
+- packaged Source Edit API smoke: passed;
+- Tauri NSIS installer: passed;
+- Tauri MSI installer: passed;
+- Windows Artifact upload: passed.
+
+Merge commit: `1a5825e22027bfc8493346f30df4366a12a5704e`.
