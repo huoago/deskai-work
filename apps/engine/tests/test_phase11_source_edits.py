@@ -148,7 +148,7 @@ def test_phase11_text_edit_requires_write_permission_and_human_confirmation(clie
     )
     assert proposal["status"] == "pending"
     assert proposal["requires_user_confirmation"] is True
-    assert "-alpha old beta" in proposal["diff_preview"].replace(" ", "")
+    assert "-alphaoldbeta" in proposal["diff_preview"].replace(" ", "")
     assert source.read_text(encoding="utf-8") == "alpha old beta\n"
 
     detail = client.get(f"/tasks/{task['id']}").json()
