@@ -4,6 +4,7 @@ import {
   addWorkspaceRoot,
   checkEngine,
   confirmSourceFileEdit,
+  confirmSourceFileEditBatch,
   createMemory,
   createTask,
   createWorkspace,
@@ -32,9 +33,11 @@ import {
   processMemoryQueue,
   processParserQueue,
   rejectSourceFileEdit,
+  rejectSourceFileEditBatch,
   retryMemoryQueue,
   retryTask,
   rollbackSourceFileEdit,
+  rollbackSourceFileEditBatch,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -691,6 +694,52 @@ export default function App() {
     }
   }
 
+  async function onConfirmSourceEditBatch(batchId: string, taskId: string) {
+    if (!window.confirm("确认一次性应用这一组文件修改吗？DeskAI 会先预检全部文件、创建全部备份，再按事务执行；任何一项失败都会自动恢复已写入文件。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await confirmSourceFileEditBatch(batchId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("批量源文件事务已全部应用，所有原文件备份均已保留并重新进入索引流程。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "应用批量源文件事务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRejectSourceEditBatch(batchId: string, taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await rejectSourceFileEditBatch(batchId);
+      setTaskDetail(await getTask(taskId));
+      setNotice("已拒绝整个批量编辑事务，所有源文件均未发生变化。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拒绝批量源文件事务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRollbackSourceEditBatch(batchId: string, taskId: string) {
+    if (!window.confirm("确认整体回滚这一组文件吗？DeskAI 会先确认所有文件仍是刚刚应用的版本，再将整组文件恢复到修改前状态。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await rollbackSourceFileEditBatch(batchId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("批量源文件事务已整体回滚，所有成员已恢复到修改前版本。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "回滚批量源文件事务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -898,6 +947,9 @@ export default function App() {
             onConfirmEdit={onConfirmSourceEdit}
             onRejectEdit={onRejectSourceEdit}
             onRollbackEdit={onRollbackSourceEdit}
+            onConfirmBatch={onConfirmSourceEditBatch}
+            onRejectBatch={onRejectSourceEditBatch}
+            onRollbackBatch={onRollbackSourceEditBatch}
           />
         ) : page === "activity" ? (
           <ActivityPage activity={activity} />
@@ -974,7 +1026,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 11 · AI + 记忆 + Web Research + 人工确认源文件编辑</span>
+          <span className="phase-chip">Phase 12 · AI + Web Research + 单文件编辑 + 跨文件事务</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1062,7 +1114,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11 写入边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
@@ -1406,7 +1458,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1421,12 +1473,17 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onConfirmEdit: (editId: string, taskId: string) => void;
   onRejectEdit: (editId: string, taskId: string) => void;
   onRollbackEdit: (editId: string, taskId: string) => void;
+  onConfirmBatch: (batchId: string, taskId: string) => void;
+  onRejectBatch: (batchId: string, taskId: string) => void;
+  onRollbackBatch: (batchId: string, taskId: string) => void;
 }) {
   const pending = tasks.filter((item) => item.status === "pending").length;
   const running = tasks.filter((item) => item.status === "running").length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
   const edits = detail?.file_edits ?? [];
+  const batches = detail?.file_edit_batches ?? [];
+  const singleEdits = edits.filter((edit) => !edit.batch_id);
 
   return (
     <section className="tasks-page">
@@ -1442,7 +1499,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，并为已开启写权限的 TXT/MD/DOCX/XLSX 生成编辑提案；实际覆盖必须由你逐次确认。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，并为 TXT/MD/DOCX/XLSX 生成单文件或 2–10 文件事务提案；所有源文件写入都必须由你确认。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1499,15 +1556,73 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
 
-              {edits.length > 0 && (
+              {batches.length > 0 && (
+                <div className="source-edit-section batch-transaction-section">
+                  <div className="artifact-section-head">
+                    <strong>跨文件事务提案</strong>
+                    <span>{batches.length} 个事务</span>
+                  </div>
+                  <p className="artifact-policy-note">每个事务会一次性预检、备份并提交全部成员；任何成员失败都会自动回滚已经写入的文件。事务成员不能单独确认。</p>
+                  <div className="source-edit-list">
+                    {batches.map((batch) => (
+                      <article className="source-edit-card batch-transaction-card" key={batch.id}>
+                        <div className="source-edit-head">
+                          <div>
+                            <strong>{batch.summary}</strong>
+                            <span>{batch.edit_count} 个文件 · All-or-nothing · {sourceEditBatchStatusLabel(batch.status)}</span>
+                          </div>
+                          <span className={`task-status ${batch.status === "pending" ? "blocked" : batch.status === "applied" || batch.status === "rolled_back" ? "completed" : "failed"}`}>
+                            {sourceEditBatchStatusLabel(batch.status)}
+                          </span>
+                        </div>
+                        <div className="batch-member-list">
+                          {batch.edits.map((edit) => (
+                            <div className="batch-member" key={edit.id}>
+                              <div>
+                                <strong>{edit.filename}</strong>
+                                <span>{edit.kind.toUpperCase()} · {edit.summary}</span>
+                              </div>
+                              <pre className="edit-diff-preview">{edit.diff_preview || "没有可显示的差异预览。"}</pre>
+                              <div className="source-edit-hash">
+                                <small>原 SHA-256 {edit.original_sha256.slice(0, 16)}…</small>
+                                <small>候选 SHA-256 {edit.candidate_sha256.slice(0, 16)}…</small>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {batch.error_message && <div className="provider-error">{batch.error_message}</div>}
+                        {batch.status === "pending" && (
+                          <div className="button-row">
+                            <button className="primary" disabled={disabled} onClick={() => onConfirmBatch(batch.id, detail.id)}>确认整批应用</button>
+                            <button className="secondary" disabled={disabled} onClick={() => onRejectBatch(batch.id, detail.id)}>拒绝整批</button>
+                          </div>
+                        )}
+                        {batch.status === "applied" && (
+                          <div className="button-row">
+                            <button className="secondary" disabled={disabled} onClick={() => onRollbackBatch(batch.id, detail.id)}>整体回滚</button>
+                            <span className="muted small">全部成员已应用并保留独立备份。</span>
+                          </div>
+                        )}
+                        {batch.status === "recovery_required" && (
+                          <div className="provider-error">事务状态无法安全自动恢复。DeskAI 已停止继续写入，需人工核对成员文件。</div>
+                        )}
+                        {batch.status === "rolled_back" && <p className="muted small">整批文件已恢复到修改前状态。</p>}
+                        {batch.status === "rejected" && <p className="muted small">整批提案已拒绝，源文件从未被修改。</p>}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {singleEdits.length > 0 && (
                 <div className="source-edit-section">
                   <div className="artifact-section-head">
                     <strong>源文件编辑提案</strong>
-                    <span>{edits.length} 个</span>
+                    <span>{singleEdits.length} 个</span>
                   </div>
                   <p className="artifact-policy-note">Agent 只能生成提案；只有你点击“确认应用”后，DeskAI 才会再次校验 SHA-256、创建原文件备份并覆盖源文件。</p>
                   <div className="source-edit-list">
-                    {edits.map((edit) => (
+                    {singleEdits.map((edit) => (
                       <article className="source-edit-card" key={edit.id}>
                         <div className="source-edit-head">
                           <div>
@@ -1576,7 +1691,8 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 <span>运行 {detail.runs.length} 次</span>
                 <span>工具调用 {detail.tool_calls.length} 次</span>
                 <span>生成文件 {detail.artifacts.length} 个</span>
-                <span>源文件提案 {edits.length} 个</span>
+                <span>单文件提案 {singleEdits.length} 个</span>
+                <span>跨文件事务 {batches.length} 个</span>
                 <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
               </div>
 
@@ -1628,6 +1744,19 @@ function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
   );
 }
 
+function sourceEditBatchStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "等待整批确认",
+    applying: "事务提交中",
+    applied: "整批已应用",
+    rolling_back: "整体回滚中",
+    rolled_back: "整批已回滚",
+    rejected: "整批已拒绝",
+    recovery_required: "需要人工恢复",
+  };
+  return labels[status] ?? status;
+}
+
 function sourceEditStatusLabel(status: string) {
   const labels: Record<string, string> = {
     pending: "等待确认",
@@ -1663,6 +1792,14 @@ function activityLabel(action: string) {
     source_edit_applied: "源文件编辑已应用",
     source_edit_rejected: "源文件编辑已拒绝",
     source_edit_rolled_back: "源文件编辑已回滚",
+    source_edit_batch_applied: "跨文件事务已应用",
+    source_edit_batch_rejected: "跨文件事务已拒绝",
+    source_edit_batch_rolled_back: "跨文件事务已回滚",
+    source_edit_batch_apply_failed_restored: "跨文件事务失败并已自动恢复",
+    source_edit_batch_rollback_failed_reapplied: "批量回滚失败并已恢复应用态",
+    source_edit_batch_startup_recovered: "启动时已恢复中断事务",
+    source_edit_batch_startup_rollback_completed: "启动时已完成中断回滚",
+    source_edit_batch_recovery_required: "跨文件事务需要人工恢复",
   };
   return labels[action] ?? action;
 }
@@ -1736,7 +1873,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 11</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 12</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1749,6 +1886,9 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
           <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
           <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件或系统命令</p>\n          <p><b>✓</b> Phase 10 Web Research 仅通过 Provider 托管搜索，保留 Source；Local Only 禁用，并阻断疑似密钥查询</p>\n          <p><b>✓</b> Web Research 不提供任意 URL 抓取、下载、浏览器控制或网页指令执行</p>\n          <p><b>✓</b> Phase 11 Agent 只能生成源文件编辑提案，不能直接覆盖源文件</p>\n          <p><b>✓</b> 源文件编辑需目录 write_allowed + 逐次人工确认 + SHA-256 复核 + 自动备份</p>\n          <p><b>✓</b> 已应用编辑只有在文件未再次变化时才允许自动回滚</p>
+          <p><b>✓</b> Phase 12 支持 2–10 个文件的 All-or-nothing 事务提案与一次确认</p>
+          <p><b>✓</b> 批量提交先全量预检与备份，任一写入失败会恢复已写入成员</p>
+          <p><b>✓</b> Engine 启动会恢复中断的 applying/rolling_back 事务；无法安全判断时进入 recovery_required</p>
         </div>
       </article>
     </section>

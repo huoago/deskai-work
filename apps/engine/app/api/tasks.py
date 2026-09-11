@@ -121,6 +121,10 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
         task_id=task_id,
         limit=100,
     )
+    payload["file_edit_batches"] = request.app.state.source_edit_batch_service.list(
+        task_id=task_id,
+        limit=100,
+    )
     return payload
 
 

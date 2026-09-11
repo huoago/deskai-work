@@ -153,3 +153,50 @@ Rollback is separately user-triggered. It is permitted only if the current sourc
 Phase 11 still does not provide source-file delete, move, rename, arbitrary path writes, shell access, unrestricted Python, browser control, or unattended source overwrites.
 
 For DOCX replacement proposals, affected paragraphs are rewritten through python-docx; inline run formatting inside changed paragraphs may be simplified. XLSX edit proposals modify explicit cells only and neutralize formula-like text values instead of introducing formulas.
+
+
+## Transactional multi-file write boundary
+
+Phase 12 extends confirmed source editing from one file to a coordinated batch of 2–10 supported source files.
+
+The Agent may call `propose_source_file_edit_batch`, an L3 staging tool. This tool can only create private candidate files and one batch record. It cannot write, rename, move, or delete Workspace source files.
+
+Every member must independently satisfy the Phase 11 source-edit boundary:
+
+- active Workspace ownership;
+- readable source file;
+- containing Workspace root has `write_allowed=true`;
+- source is not a symlink;
+- supported TXT/MD/DOCX/XLSX type and size;
+- current SHA-256 matches DeskAI's recorded file version.
+
+A batch rejects duplicate file ids and contains at most ten members.
+
+Before the first source write, desktop-confirmed batch apply performs a full preflight over **all** members:
+
+1. revalidate Workspace write permission;
+2. require each current source SHA-256 to match the staged original SHA;
+3. verify each candidate SHA-256;
+4. check that every source can be opened for writing;
+5. refuse DOCX/XLSX members when a Microsoft Office `~$` lock file is present;
+6. create and verify an original backup for every member.
+
+Only after every preflight and backup succeeds does the Engine enter the `applying` state.
+
+Batch apply is all-or-nothing at the DeskAI transaction layer. Members are replaced one by one using the existing same-directory temporary-file + `os.replace` mechanism. If any member write or hash verification fails, every member already written in that attempt is restored from its verified backup in reverse order.
+
+A successfully applied batch records all members as applied together and writes an L6 batch audit event.
+
+Batch members cannot be confirmed, rejected, or rolled back through the single-file API. They must be acted on as one batch, preventing UI/API paths from breaking transaction consistency.
+
+Batch rollback also preflights the entire batch. Every current source must still match the exact SHA that DeskAI applied. If rollback fails part way through, DeskAI attempts to reapply the staged candidates for already-restored members so the batch returns to the previously applied state.
+
+### Interrupted-process recovery
+
+Before Agent workers start, the Engine inspects batches left in `applying` or `rolling_back`.
+
+For each member, automatic recovery acts only when the current file hash equals either the staged original hash or the staged candidate hash and the verified original backup is available. Candidate-state files are restored to the original version.
+
+If any member has an unknown hash, missing/corrupt backup, or cannot be safely restored, the whole batch enters `recovery_required`. DeskAI then performs no further automatic writes for that batch.
+
+Phase 12 still does not add arbitrary destination writes, source deletion, rename/move, unrestricted Python, shell/subprocess execution, browser control, or unattended source-file mutation.

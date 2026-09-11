@@ -97,6 +97,7 @@ export type KnowledgeStatus = {
 export type SearchHit = {
   chunk_id: string;
   file_id: string;
+  batch_id: string | null;
   filename: string;
   score: number;
   content: string;
@@ -260,6 +261,7 @@ export type SourceFileEditRecord = {
   task_id: string;
   workspace_id: string;
   file_id: string;
+  batch_id: string | null;
   filename: string;
   kind: "text" | "docx" | "xlsx" | string;
   status: "pending" | "applied" | "rejected" | "rolled_back" | string;
@@ -279,11 +281,40 @@ export type SourceFileEditRecord = {
   backup_created: boolean;
 };
 
+export type SourceFileEditBatchRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  status:
+    | "pending"
+    | "applying"
+    | "applied"
+    | "rolling_back"
+    | "rolled_back"
+    | "rejected"
+    | "recovery_required"
+    | string;
+  summary: string;
+  edit_count: number;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  applied_at: string | null;
+  rejected_at: string | null;
+  rolled_back_at: string | null;
+  requires_user_confirmation: boolean;
+  can_rollback: boolean;
+  recovery_required: boolean;
+  transactional: boolean;
+  edits: SourceFileEditRecord[];
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
   artifacts: GeneratedArtifactRecord[];
   file_edits: SourceFileEditRecord[];
+  file_edit_batches: SourceFileEditBatchRecord[];
 };
 
 export type AgentStatus = {
@@ -578,6 +609,18 @@ export function rejectSourceFileEdit(editId: string): Promise<SourceFileEditReco
 
 export function rollbackSourceFileEdit(editId: string): Promise<SourceFileEditRecord> {
   return request<SourceFileEditRecord>(`/file-edits/${editId}/rollback`, { method: "POST" });
+}
+
+export function confirmSourceFileEditBatch(batchId: string): Promise<SourceFileEditBatchRecord> {
+  return request<SourceFileEditBatchRecord>(`/file-edit-batches/${batchId}/confirm`, { method: "POST" });
+}
+
+export function rejectSourceFileEditBatch(batchId: string): Promise<SourceFileEditBatchRecord> {
+  return request<SourceFileEditBatchRecord>(`/file-edit-batches/${batchId}/reject`, { method: "POST" });
+}
+
+export function rollbackSourceFileEditBatch(batchId: string): Promise<SourceFileEditBatchRecord> {
+  return request<SourceFileEditBatchRecord>(`/file-edit-batches/${batchId}/rollback`, { method: "POST" });
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {

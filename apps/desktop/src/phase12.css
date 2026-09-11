@@ -1,0 +1,46 @@
+.batch-transaction-section {
+  border-style: dashed;
+}
+
+.batch-transaction-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.batch-transaction-card::before {
+  content: "TRANSACTION";
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.batch-member-list {
+  display: grid;
+  gap: 10px;
+}
+
+.batch-member {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.batch-member > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.batch-member > div:first-child span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.batch-transaction-card .edit-diff-preview {
+  max-height: 180px;
+}

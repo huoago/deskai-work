@@ -52,6 +52,7 @@ class SourceFileEditService:
         summary: str,
         replacements: list[dict[str, Any]],
         cell_edits: list[dict[str, Any]],
+        batch_id: str | None = None,
     ) -> dict[str, Any]:
         file, _root, source = self._editable_file(
             task_id=task_id,
@@ -106,6 +107,7 @@ class SourceFileEditService:
                 task_id=task_id,
                 workspace_id=workspace_id,
                 file_id=file_id,
+                batch_id=batch_id,
                 kind=kind,
                 status="pending",
                 summary=normalized_summary,
@@ -125,6 +127,7 @@ class SourceFileEditService:
             raise
 
     def confirm(self, edit_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(edit_id)
         snapshot = self._action_snapshot(edit_id, expected_status="pending")
         source = snapshot["source"]
         candidate = snapshot["candidate"]
@@ -136,6 +139,7 @@ class SourceFileEditService:
             raise ValueError("Source file changed after the proposal; confirmation is blocked")
         if not candidate.is_file() or sha256_file(candidate) != snapshot["candidate_sha256"]:
             raise ValueError("Staged edit candidate is missing or corrupted")
+        self.probe_source_available(source)
 
         backup.parent.mkdir(parents=True, exist_ok=True)
         if backup.exists():
@@ -189,6 +193,7 @@ class SourceFileEditService:
         return self.get(edit_id)
 
     def reject(self, edit_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(edit_id)
         now = datetime.now(timezone.utc)
         with self.database.session() as session:
             edit = session.get(SourceFileEdit, edit_id)
@@ -210,6 +215,7 @@ class SourceFileEditService:
         return self.get(edit_id)
 
     def rollback(self, edit_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(edit_id)
         snapshot = self._action_snapshot(edit_id, expected_status="applied")
         source = snapshot["source"]
         candidate = snapshot["candidate"]
@@ -224,6 +230,7 @@ class SourceFileEditService:
             raise ValueError("Original backup is missing or corrupted")
         if not candidate.is_file() or sha256_file(candidate) != snapshot["candidate_sha256"]:
             raise ValueError("Applied candidate copy is missing or corrupted")
+        self.probe_source_available(source)
 
         self._atomic_replace(backup, source)
         restored_sha = sha256_file(source)
@@ -304,6 +311,7 @@ class SourceFileEditService:
             "task_id": edit.task_id,
             "workspace_id": edit.workspace_id,
             "file_id": edit.file_id,
+            "batch_id": edit.batch_id,
             "filename": filename,
             "kind": edit.kind,
             "status": edit.status,
@@ -369,6 +377,32 @@ class SourceFileEditService:
             session.expunge(matched)
             return file, matched, source
 
+    def _ensure_individual_action(self, edit_id: str) -> None:
+        with self.database.session() as session:
+            edit = session.get(SourceFileEdit, edit_id)
+            if edit is None:
+                raise ValueError("Edit proposal not found")
+            if edit.batch_id:
+                raise ValueError(
+                    "This edit belongs to a transactional batch and must be acted on through the batch"
+                )
+
+    @staticmethod
+    def probe_source_available(source: Path) -> None:
+        if source.suffix.lower() in {".docx", ".xlsx"}:
+            office_lock = source.with_name("~$" + source.name)
+            if office_lock.exists():
+                raise ValueError(
+                    f"Source file appears to be open in Microsoft Office: {source.name}"
+                )
+        try:
+            with source.open("r+b"):
+                pass
+        except OSError as exc:
+            raise ValueError(
+                f"Source file is not writable or may be locked by another application: {source.name}"
+            ) from exc
+
     def _action_snapshot(self, edit_id: str, *, expected_status: str) -> dict[str, Any]:
         with self.database.session() as session:
             edit = session.get(SourceFileEdit, edit_id)
@@ -414,6 +448,12 @@ class SourceFileEditService:
                 raise ValueError("Edit candidate path escaped the DeskAI sandbox")
             session.expunge(root)
             return {
+                "edit_id": edit.id,
+                "task_id": edit.task_id,
+                "workspace_id": edit.workspace_id,
+                "file_id": edit.file_id,
+                "batch_id": edit.batch_id,
+                "filename": file.filename,
                 "source": source,
                 "candidate": candidate,
                 "backup": backup,
