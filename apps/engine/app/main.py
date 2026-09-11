@@ -36,6 +36,7 @@ from app.memory.service import MemoryService
 from app.memory.worker import MemoryWorker
 from app.parsing.service import ParserWorker
 from app.security.secrets import SecretStore
+from app.web.service import WebResearchService
 
 ALLOWED_DESKTOP_ORIGINS = [
     "http://127.0.0.1:1420",
@@ -93,6 +94,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.artifact_service = artifact_service
         analysis_service = DataAnalysisService(app.state.database, parser_worker.cache)
         app.state.analysis_service = analysis_service
+        web_research_service = WebResearchService(
+            app.state.database,
+            app.state.secret_store,
+            app.state.openai_provider,
+        )
+        app.state.web_research_service = web_research_service
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
@@ -100,6 +107,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             parser_worker.cache,
             artifact_service,
             analysis_service,
+            web_research_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(
