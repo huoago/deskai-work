@@ -5,8 +5,6 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
-
 from app.api.settings import DEFAULTS
 from app.database.models import AgentRun, AuditLog, Setting, Task
 
