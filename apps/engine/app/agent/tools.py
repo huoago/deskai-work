@@ -364,9 +364,14 @@ class ToolRegistry:
         _workspace_id: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
-        variables = arguments.get("variables") or {}
-        if not isinstance(variables, dict):
-            raise ValueError("variables must be an object")
+        raw_variables = arguments.get("variables") or []
+        if not isinstance(raw_variables, list):
+            raise ValueError("variables must be a list")
+        variables: dict[str, float] = {}
+        for item in raw_variables[:50]:
+            if not isinstance(item, dict):
+                raise ValueError("Each variable must be an object")
+            variables[str(item.get("name") or "")] = float(item.get("value"))
         return self.analysis_service.calculate(
             str(arguments.get("expression") or ""),
             variables,
@@ -589,8 +594,17 @@ def _tool_specs() -> list[ToolSpec]:
                 "properties": {
                     "expression": {"type": "string", "minLength": 1, "maxLength": 500},
                     "variables": {
-                        "type": "object",
-                        "additionalProperties": {"type": "number"},
+                        "type": "array",
+                        "maxItems": 50,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "minLength": 1, "maxLength": 64},
+                                "value": {"type": "number"},
+                            },
+                            "required": ["name", "value"],
+                            "additionalProperties": False,
+                        },
                     },
                 },
                 "required": ["expression", "variables"],
@@ -604,7 +618,7 @@ def _tool_specs() -> list[ToolSpec]:
                 "type": "object",
                 "properties": {
                     "file_id": {"type": "string", "minLength": 1},
-                    "sheet": {"type": ["string", "null"]},
+                    "sheet": {"type": "string", "maxLength": 255},
                     "header_row": {"type": "integer", "minimum": 1, "maximum": 20},
                     "max_rows": {"type": "integer", "minimum": 1, "maximum": 50},
                 },
@@ -619,7 +633,7 @@ def _tool_specs() -> list[ToolSpec]:
                 "type": "object",
                 "properties": {
                     "file_id": {"type": "string", "minLength": 1},
-                    "sheet": {"type": ["string", "null"]},
+                    "sheet": {"type": "string", "maxLength": 255},
                     "header_row": {"type": "integer", "minimum": 1, "maximum": 20},
                     "columns": {
                         "type": "array",
@@ -638,7 +652,7 @@ def _tool_specs() -> list[ToolSpec]:
                 "type": "object",
                 "properties": {
                     "file_id": {"type": "string", "minLength": 1},
-                    "sheet": {"type": ["string", "null"]},
+                    "sheet": {"type": "string", "maxLength": 255},
                     "header_row": {"type": "integer", "minimum": 1, "maximum": 20},
                     "group_by": {"type": "string", "minLength": 1},
                     "value_column": {"type": "string", "minLength": 1},
