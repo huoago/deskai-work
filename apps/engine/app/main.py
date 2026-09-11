@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import __version__
+
 from app.api.artifacts import router as artifacts_router
 from app.api.chat import router as chat_router
 from app.api.errors import AppError, app_error_handler
@@ -131,7 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.8.0",
+        version=__version__,
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
