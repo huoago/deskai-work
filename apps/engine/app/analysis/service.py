@@ -6,8 +6,6 @@ import statistics
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
-
 from app.database.models import File, FileVersion
 from app.database.session import Database
 
