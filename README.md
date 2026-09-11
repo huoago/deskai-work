@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 10 are complete. Phase 11 confirmed source-file editing is implemented and gated by CI before merge.**
+**Phase 0 through Phase 11 are complete and merged to `main`.**
 
 Implemented foundations:
 
