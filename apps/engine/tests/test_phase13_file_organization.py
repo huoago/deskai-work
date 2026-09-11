@@ -237,6 +237,30 @@ def test_phase13_target_collision_and_stale_source_block_confirmation(client, tm
     assert not (root_path / "fresh.md").exists()
 
 
+def test_phase13_confirm_never_overwrites_target_created_after_proposal(client, tmp_path):
+    workspace, _root, file, task, source, root_path = _workspace_with_file(
+        client,
+        tmp_path,
+    )
+    proposal = client.app.state.file_organization_service.propose(
+        task_id=task["id"],
+        workspace_id=workspace["id"],
+        file_id=file["id"],
+        operation="rename",
+        summary="Rename without overwrite",
+        new_name="late-target.md",
+        target_relative_dir="",
+    )
+    target = root_path / "late-target.md"
+    target.write_text("external target", encoding="utf-8")
+
+    response = client.post(f"/file-operations/{proposal['id']}/confirm")
+    assert response.status_code == 409
+    assert "Target path already exists" in response.json()["detail"]
+    assert source.read_text(encoding="utf-8") == "phase thirteen\n"
+    assert target.read_text(encoding="utf-8") == "external target"
+
+
 def test_phase13_move_is_limited_to_existing_directory_in_same_root(client, tmp_path):
     workspace, _root, file, task, source, root_path = _workspace_with_file(
         client,
@@ -381,6 +405,38 @@ def test_phase13_startup_recovery_finishes_interrupted_apply(client, tmp_path):
     files = client.get(f"/files?workspace_id={workspace['id']}").json()
     same_file = next(item for item in files if item["id"] == file["id"])
     assert Path(same_file["path"]) == target.resolve()
+
+
+def test_phase13_startup_recovery_freezes_ambiguous_paths(client, tmp_path):
+    workspace, _root, file, task, source, root_path = _workspace_with_file(
+        client,
+        tmp_path,
+    )
+    service = client.app.state.file_organization_service
+    proposal = service.propose(
+        task_id=task["id"],
+        workspace_id=workspace["id"],
+        file_id=file["id"],
+        operation="rename",
+        summary="Ambiguous recovery",
+        new_name="ambiguous.md",
+        target_relative_dir="",
+    )
+    target = root_path / "ambiguous.md"
+    target.write_bytes(source.read_bytes())
+
+    with client.app.state.database.session() as session:
+        record = session.get(FileOrganizationProposal, proposal["id"])
+        assert record is not None
+        record.status = "applying"
+        record.confirmed_at = datetime.now(timezone.utc)
+
+    recovered = service.recover_incomplete_operations()
+    assert recovered == {"recovered": 0, "blocked": 1}
+    current = client.get(f"/file-operations/{proposal['id']}").json()
+    assert current["status"] == "recovery_required"
+    assert source.exists()
+    assert target.exists()
 
 
 def test_phase13_agent_can_only_stage_file_organization(client, tmp_path):
