@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.15.0") {
+  if ([string]$health.version -ne "0.16.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.15.0, got $($health.version)."
+    throw "Expected packaged engine version 0.16.0, got $($health.version)."
   }
 
   try {
@@ -137,6 +137,15 @@ try {
   }
 
   Write-Host "Packaged Recycle Bin endpoint OK: count=$(@($recycleProposals).Count)"
+
+  try {
+    $recycleBatches = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/recycle-batches" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Recycle Batch API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Recycle Batch endpoint OK: count=$(@($recycleBatches).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force
