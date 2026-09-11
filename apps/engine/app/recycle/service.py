@@ -448,8 +448,11 @@ class FileRecycleService:
             source = Path(file.path)
             if source.is_symlink():
                 raise ValueError("Symlink source files cannot be recycled")
-            source = source.resolve(strict=True)
-            original = Path(proposal.original_path).resolve(strict=True)
+            try:
+                source = source.resolve(strict=True)
+                original = Path(proposal.original_path).resolve(strict=True)
+            except OSError as exc:
+                raise ValueError("Recycle source file is missing or inaccessible") from exc
             if source != original:
                 raise ValueError(
                     "File path changed after the recycle proposal; confirmation is blocked"
@@ -506,7 +509,7 @@ class FileRecycleService:
                 "workspace_id": proposal.workspace_id,
                 "file_id": proposal.file_id,
                 "original": original,
-                "quarantine": Path(proposal.quarantine_path).resolve(strict=True),
+                "quarantine": self._require_quarantine_path(proposal.quarantine_path),
                 "original_sha256": proposal.original_sha256,
                 "previous_file_status": proposal.previous_file_status,
                 "root": root,
@@ -740,6 +743,16 @@ class FileRecycleService:
             )
 
     @staticmethod
+    def _require_quarantine_path(value: str) -> Path:
+        try:
+            path = Path(value)
+            if path.is_symlink():
+                raise ValueError("Quarantine copy cannot be a symlink")
+            return path.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("Quarantine copy is missing or inaccessible") from exc
+
+    @staticmethod
     def _cancel_active_jobs(session, file_id: str, reason: str) -> None:
         for job in session.scalars(
             select(IndexJob).where(
@@ -872,7 +885,10 @@ class FileRecycleService:
                 )
             ).all()
         )
-        parent = path.parent.resolve(strict=True)
+        try:
+            parent = path.parent.resolve(strict=True)
+        except OSError:
+            return None
         for root in roots:
             try:
                 normalized = normalize_root(root.path)
