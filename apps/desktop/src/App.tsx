@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addWorkspaceRoot,
   checkEngine,
+  confirmSourceFileEdit,
   createMemory,
   createTask,
   createWorkspace,
@@ -30,8 +31,10 @@ import {
   processKnowledgeQueue,
   processMemoryQueue,
   processParserQueue,
+  rejectSourceFileEdit,
   retryMemoryQueue,
   retryTask,
+  rollbackSourceFileEdit,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -348,6 +351,27 @@ export default function App() {
     }
   }
 
+  async function onToggleWrite(root: WorkspaceRoot) {
+    if (!activeWorkspaceId) return;
+    if (!root.write_allowed) {
+      const approved = window.confirm(
+        "开启后，DeskAI 可为此目录内受支持文件生成源文件编辑提案。任何实际覆盖仍必须在任务详情中逐次人工确认，并会先自动备份原文件。确定开启写入授权吗？",
+      );
+      if (!approved) return;
+    }
+    setBusy(true);
+    setNotice("");
+    try {
+      await updateWorkspaceRoot(activeWorkspaceId, root.id, { write_allowed: !root.write_allowed });
+      await refreshWorkspaceData();
+      setNotice(root.write_allowed ? "已关闭该目录源文件写入授权。" : "已开启该目录写入授权；实际编辑仍需逐次确认。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "更新写入授权失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onRevokeRoot(root: WorkspaceRoot) {
     if (!activeWorkspaceId) return;
     if (!window.confirm("撤销后 DeskAI 将不再读取此目录；不会删除电脑上的任何文件。继续吗？")) return;
@@ -621,6 +645,52 @@ export default function App() {
     }
   }
 
+  async function onConfirmSourceEdit(editId: string, taskId: string) {
+    if (!window.confirm("确认将这个编辑提案写入原文件吗？DeskAI 会先备份原文件，并在写入前再次校验 SHA-256。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await confirmSourceFileEdit(editId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("源文件编辑已应用，原文件备份已保留，并已重新进入索引流程。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "应用源文件编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRejectSourceEdit(editId: string, taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await rejectSourceFileEdit(editId);
+      setTaskDetail(await getTask(taskId));
+      setNotice("已拒绝该源文件编辑提案，原文件未发生变化。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拒绝源文件编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRollbackSourceEdit(editId: string, taskId: string) {
+    if (!window.confirm("确认回滚到修改前的备份版本吗？只有当当前文件仍保持 DeskAI 刚刚应用的版本时才允许自动回滚。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await rollbackSourceFileEdit(editId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("源文件已回滚到修改前版本，并重新进入索引流程。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "回滚源文件编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -768,6 +838,7 @@ export default function App() {
             onAddFolder={onAddFolder}
             onScan={onScanWorkspace}
             onToggleWatch={onToggleWatch}
+            onToggleWrite={onToggleWrite}
             onRevoke={onRevokeRoot}
             disabled={!online || busy}
           />
@@ -824,6 +895,9 @@ export default function App() {
             onSelect={onSelectTask}
             onRetry={onRetryTask}
             onProcess={onProcessAgentQueue}
+            onConfirmEdit={onConfirmSourceEdit}
+            onRejectEdit={onRejectSourceEdit}
+            onRollbackEdit={onRollbackSourceEdit}
           />
         ) : page === "activity" ? (
           <ActivityPage activity={activity} />
@@ -956,7 +1030,7 @@ function MessageBubble({ role, content, citations = [], pending = false }: { rol
   );
 }
 
-function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parserStatus, onAddFolder, onScan, onToggleWatch, onRevoke, disabled }: {
+function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parserStatus, onAddFolder, onScan, onToggleWatch, onToggleWrite, onRevoke, disabled }: {
   workspace: Workspace | null;
   roots: WorkspaceRoot[];
   files: IndexedFile[];
@@ -967,6 +1041,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
   onAddFolder: () => void;
   onScan: () => void;
   onToggleWatch: (root: WorkspaceRoot) => void;
+  onToggleWrite: (root: WorkspaceRoot) => void;
   onRevoke: (root: WorkspaceRoot) => void;
   disabled: boolean;
 }) {
@@ -991,8 +1066,9 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
-                <div className="root-path"><strong>{root.path}</strong><span>只读：{root.read_allowed ? "是" : "否"} · Watcher：{root.watch_enabled ? "开启" : "暂停"}</span></div>
+                <div className="root-path"><strong>{root.path}</strong><span>读取：{root.read_allowed ? "已授权" : "关闭"} · 写入：{root.write_allowed ? "已授权" : "关闭"} · Watcher：{root.watch_enabled ? "开启" : "暂停"}</span></div>
                 <div className="row-actions">
+                  <button className={root.write_allowed ? "text-button danger" : "text-button"} onClick={() => onToggleWrite(root)} disabled={disabled}>{root.write_allowed ? "关闭写入" : "允许写入"}</button>
                   <button className="text-button" onClick={() => onToggleWatch(root)} disabled={disabled}>{root.watch_enabled ? "暂停监控" : "开启监控"}</button>
                   <button className="text-button danger" onClick={() => onRevoke(root)} disabled={disabled}>撤销授权</button>
                 </div>
