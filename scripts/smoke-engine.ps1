@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.16.0") {
+  if ([string]$health.version -ne "0.17.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.16.0, got $($health.version)."
+    throw "Expected packaged engine version 0.17.0, got $($health.version)."
   }
 
   try {
@@ -146,6 +146,15 @@ try {
   }
 
   Write-Host "Packaged Recycle Batch endpoint OK: count=$(@($recycleBatches).Count)"
+
+  try {
+    $recovery = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/recovery" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Recovery Center API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Recovery Center endpoint OK: count=$(@($recovery).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force
