@@ -1,6 +1,6 @@
 # Phase 9 — Controlled local calculation and table analysis
 
-Status: implemented on the Phase 9 branch and pending final CI verification.
+Status: complete and merged to `main` after all required CI gates passed.
 
 ## Objective
 
@@ -166,4 +166,4 @@ CI tests verify:
 
 Phase 9 is analysis-only.
 
-A later phase may add web research and/or a stronger OS-isolated computation sandbox. Arbitrary local Python execution must not be enabled merely by reusing this expression evaluator.
+Phase 10 adds controlled provider-backed web research. A later phase may add a stronger OS-isolated computation sandbox. Arbitrary local Python execution must not be enabled merely by reusing this expression evaluator.
