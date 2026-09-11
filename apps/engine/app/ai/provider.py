@@ -161,6 +161,7 @@ Use scope=global only for durable cross-project preferences/constraints/workflow
                 tools=tools,
                 tool_choice="auto",
                 parallel_tool_calls=False,
+                include=["reasoning.encrypted_content"],
                 store=False,
             )
             tool_calls: list[AgentToolRequest] = []
