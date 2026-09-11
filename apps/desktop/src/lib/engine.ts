@@ -255,10 +255,35 @@ export type GeneratedArtifactRecord = {
   created_at: string;
 };
 
+export type SourceFileEditRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  file_id: string;
+  filename: string;
+  kind: "text" | "docx" | "xlsx" | string;
+  status: "pending" | "applied" | "rejected" | "rolled_back" | string;
+  summary: string;
+  diff_preview: string;
+  original_sha256: string;
+  candidate_sha256: string;
+  applied_sha256: string | null;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  applied_at: string | null;
+  rejected_at: string | null;
+  rolled_back_at: string | null;
+  requires_user_confirmation: boolean;
+  can_rollback: boolean;
+  backup_created: boolean;
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
   artifacts: GeneratedArtifactRecord[];
+  file_edits: SourceFileEditRecord[];
 };
 
 export type AgentStatus = {
@@ -541,6 +566,18 @@ export function getTask(taskId: string): Promise<TaskDetail> {
 
 export function retryTask(taskId: string): Promise<TaskRecord> {
   return request<TaskRecord>(`/tasks/${taskId}/retry`, { method: "POST" });
+}
+
+export function confirmSourceFileEdit(editId: string): Promise<SourceFileEditRecord> {
+  return request<SourceFileEditRecord>(`/file-edits/${editId}/confirm`, { method: "POST" });
+}
+
+export function rejectSourceFileEdit(editId: string): Promise<SourceFileEditRecord> {
+  return request<SourceFileEditRecord>(`/file-edits/${editId}/reject`, { method: "POST" });
+}
+
+export function rollbackSourceFileEdit(editId: string): Promise<SourceFileEditRecord> {
+  return request<SourceFileEditRecord>(`/file-edits/${editId}/rollback`, { method: "POST" });
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {

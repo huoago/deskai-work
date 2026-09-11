@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.10.0") {
+  if ([string]$health.version -ne "0.11.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.10.0, got $($health.version)."
+    throw "Expected packaged engine version 0.11.0, got $($health.version)."
   }
 
   try {
@@ -92,6 +92,15 @@ try {
   }
 
   Write-Host "Packaged Artifact endpoint OK: count=$(@($artifacts).Count)"
+
+  try {
+    $fileEdits = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/file-edits" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Source Edit API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Source Edit endpoint OK: count=$(@($fileEdits).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

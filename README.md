@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 10 are complete and merged to `main`.**
+**Phase 0 through Phase 10 are complete. Phase 11 confirmed source-file editing is implemented and gated by CI before merge.**
 
 Implemented foundations:
 
@@ -55,7 +55,7 @@ Implemented foundations:
 - secret-like web query blocking and Local Only enforcement
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, and conduct source-preserving public web research through the configured AI provider. It still does **not** claim neural semantic embeddings, local LLM execution, source-file overwrite/edit, arbitrary Python/shell execution, arbitrary URL fetching/downloading, or GUI/browser control yet.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, and stage confirmed edits to existing TXT/MD/DOCX/XLSX files. Source files are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, backup, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, or unconfirmed destructive file operations.
 
 ## V1 phase boundaries
 
@@ -72,7 +72,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 10 — Controlled web research:** complete with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating.
 - Later phases add stronger OS-isolated computation and separately gated source-file write capabilities.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, and `docs/phase10-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, and `docs/phase11-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -149,6 +149,6 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Web research cannot fetch arbitrary URLs, download files, control a browser, execute webpage instructions, or access local files by itself.
 - Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
 - Unknown or destructive tool names are denied by default.
-- Source-file overwrite/edit/delete actions are not part of the current phase.
+- Source-file delete/move and arbitrary overwrite actions remain unavailable; Phase 11 supports only confirmed TXT/MD/DOCX/XLSX edits through the proposal workflow.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.

@@ -118,3 +118,38 @@ Phase 10 does **not** add:
 - permission changes based on webpage instructions.
 
 Web pages and search results remain untrusted data. Retrieved web content cannot override DeskAI system policy, Tool Registry policy, Workspace permissions, or confirmation requirements.
+
+
+## Confirmed source-file write boundary
+
+Phase 11 introduces the first controlled edits to existing Workspace source files.
+
+The Agent receives only `propose_source_file_edit`, an L3 staging tool. It can build a candidate change for TXT/MD/DOCX/XLSX files, but it cannot overwrite the source. Proposal creation requires:
+
+- the File belongs to the active Workspace;
+- the File is inside a readable Workspace root;
+- that same root has `write_allowed=true`;
+- the source is not a symlink;
+- the source type and size are inside Phase 11 limits;
+- the on-disk SHA-256 still matches DeskAI's current File record.
+
+The candidate is stored under DeskAI's private `edit_proposals/<edit_id>/` area. A proposal records the original SHA-256, candidate SHA-256, bounded diff/preview, task, file and status.
+
+Actual source mutation is not model-callable. It is exposed only through a trusted desktop confirmation action. On confirmation the Engine:
+
+1. revalidates Workspace write permission;
+2. recomputes the current source SHA-256 and requires it to match the proposal's original hash;
+3. verifies the staged candidate hash;
+4. creates a private backup under `edit_backups/<edit_id>/`;
+5. uses same-volume temporary-file replacement for the source;
+6. verifies the applied SHA-256;
+7. records an L5 `source_edit_applied` AuditLog event;
+8. rescans and requeues the updated source for parsing/indexing.
+
+If the source changed externally after the proposal, confirmation is blocked instead of overwriting the newer file.
+
+Rollback is separately user-triggered. It is permitted only if the current source SHA-256 still equals the exact hash DeskAI applied. This prevents rollback from overwriting subsequent user or external edits.
+
+Phase 11 still does not provide source-file delete, move, rename, arbitrary path writes, shell access, unrestricted Python, browser control, or unattended source overwrites.
+
+For DOCX replacement proposals, affected paragraphs are rewritten through python-docx; inline run formatting inside changed paragraphs may be simplified. XLSX edit proposals modify explicit cells only and neutralize formula-like text values instead of introducing formulas.

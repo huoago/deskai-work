@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addWorkspaceRoot,
   checkEngine,
+  confirmSourceFileEdit,
   createMemory,
   createTask,
   createWorkspace,
@@ -30,8 +31,10 @@ import {
   processKnowledgeQueue,
   processMemoryQueue,
   processParserQueue,
+  rejectSourceFileEdit,
   retryMemoryQueue,
   retryTask,
+  rollbackSourceFileEdit,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -348,6 +351,27 @@ export default function App() {
     }
   }
 
+  async function onToggleWrite(root: WorkspaceRoot) {
+    if (!activeWorkspaceId) return;
+    if (!root.write_allowed) {
+      const approved = window.confirm(
+        "开启后，DeskAI 可为此目录内受支持文件生成源文件编辑提案。任何实际覆盖仍必须在任务详情中逐次人工确认，并会先自动备份原文件。确定开启写入授权吗？",
+      );
+      if (!approved) return;
+    }
+    setBusy(true);
+    setNotice("");
+    try {
+      await updateWorkspaceRoot(activeWorkspaceId, root.id, { write_allowed: !root.write_allowed });
+      await refreshWorkspaceData();
+      setNotice(root.write_allowed ? "已关闭该目录源文件写入授权。" : "已开启该目录写入授权；实际编辑仍需逐次确认。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "更新写入授权失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onRevokeRoot(root: WorkspaceRoot) {
     if (!activeWorkspaceId) return;
     if (!window.confirm("撤销后 DeskAI 将不再读取此目录；不会删除电脑上的任何文件。继续吗？")) return;
@@ -621,6 +645,52 @@ export default function App() {
     }
   }
 
+  async function onConfirmSourceEdit(editId: string, taskId: string) {
+    if (!window.confirm("确认将这个编辑提案写入原文件吗？DeskAI 会先备份原文件，并在写入前再次校验 SHA-256。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await confirmSourceFileEdit(editId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("源文件编辑已应用，原文件备份已保留，并已重新进入索引流程。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "应用源文件编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRejectSourceEdit(editId: string, taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await rejectSourceFileEdit(editId);
+      setTaskDetail(await getTask(taskId));
+      setNotice("已拒绝该源文件编辑提案，原文件未发生变化。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拒绝源文件编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRollbackSourceEdit(editId: string, taskId: string) {
+    if (!window.confirm("确认回滚到修改前的备份版本吗？只有当当前文件仍保持 DeskAI 刚刚应用的版本时才允许自动回滚。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await rollbackSourceFileEdit(editId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("源文件已回滚到修改前版本，并重新进入索引流程。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "回滚源文件编辑失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -768,6 +838,7 @@ export default function App() {
             onAddFolder={onAddFolder}
             onScan={onScanWorkspace}
             onToggleWatch={onToggleWatch}
+            onToggleWrite={onToggleWrite}
             onRevoke={onRevokeRoot}
             disabled={!online || busy}
           />
@@ -824,6 +895,9 @@ export default function App() {
             onSelect={onSelectTask}
             onRetry={onRetryTask}
             onProcess={onProcessAgentQueue}
+            onConfirmEdit={onConfirmSourceEdit}
+            onRejectEdit={onRejectSourceEdit}
+            onRollbackEdit={onRollbackSourceEdit}
           />
         ) : page === "activity" ? (
           <ActivityPage activity={activity} />
@@ -900,7 +974,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 10 · AI + 记忆 + 安全产物 + 数据分析 + Web Research</span>
+          <span className="phase-chip">Phase 11 · AI + 记忆 + Web Research + 人工确认源文件编辑</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -956,7 +1030,7 @@ function MessageBubble({ role, content, citations = [], pending = false }: { rol
   );
 }
 
-function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parserStatus, onAddFolder, onScan, onToggleWatch, onRevoke, disabled }: {
+function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parserStatus, onAddFolder, onScan, onToggleWatch, onToggleWrite, onRevoke, disabled }: {
   workspace: Workspace | null;
   roots: WorkspaceRoot[];
   files: IndexedFile[];
@@ -967,6 +1041,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
   onAddFolder: () => void;
   onScan: () => void;
   onToggleWatch: (root: WorkspaceRoot) => void;
+  onToggleWrite: (root: WorkspaceRoot) => void;
   onRevoke: (root: WorkspaceRoot) => void;
   disabled: boolean;
 }) {
@@ -987,12 +1062,13 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 安全边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
-                <div className="root-path"><strong>{root.path}</strong><span>只读：{root.read_allowed ? "是" : "否"} · Watcher：{root.watch_enabled ? "开启" : "暂停"}</span></div>
+                <div className="root-path"><strong>{root.path}</strong><span>读取：{root.read_allowed ? "已授权" : "关闭"} · 写入：{root.write_allowed ? "已授权" : "关闭"} · Watcher：{root.watch_enabled ? "开启" : "暂停"}</span></div>
                 <div className="row-actions">
+                  <button className={root.write_allowed ? "text-button danger" : "text-button"} onClick={() => onToggleWrite(root)} disabled={disabled}>{root.write_allowed ? "关闭写入" : "允许写入"}</button>
                   <button className="text-button" onClick={() => onToggleWatch(root)} disabled={disabled}>{root.watch_enabled ? "暂停监控" : "开启监控"}</button>
                   <button className="text-button danger" onClick={() => onRevoke(root)} disabled={disabled}>撤销授权</button>
                 </div>
@@ -1330,7 +1406,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1342,11 +1418,15 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onSelect: (taskId: string) => void;
   onRetry: (taskId: string) => void;
   onProcess: () => void;
+  onConfirmEdit: (editId: string, taskId: string) => void;
+  onRejectEdit: (editId: string, taskId: string) => void;
+  onRollbackEdit: (editId: string, taskId: string) => void;
 }) {
   const pending = tasks.filter((item) => item.status === "pending").length;
   const running = tasks.filter((item) => item.status === "running").length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
+  const edits = detail?.file_edits ?? [];
 
   return (
     <section className="tasks-page">
@@ -1362,7 +1442,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析 CSV/XLSX、生成新的 Word/Excel 产物，并在 Hybrid/Cloud 模式下进行带来源的公开 Web Research；不会覆盖原始资料。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，并为已开启写权限的 TXT/MD/DOCX/XLSX 生成编辑提案；实际覆盖必须由你逐次确认。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1419,6 +1499,52 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
 
+              {edits.length > 0 && (
+                <div className="source-edit-section">
+                  <div className="artifact-section-head">
+                    <strong>源文件编辑提案</strong>
+                    <span>{edits.length} 个</span>
+                  </div>
+                  <p className="artifact-policy-note">Agent 只能生成提案；只有你点击“确认应用”后，DeskAI 才会再次校验 SHA-256、创建原文件备份并覆盖源文件。</p>
+                  <div className="source-edit-list">
+                    {edits.map((edit) => (
+                      <article className="source-edit-card" key={edit.id}>
+                        <div className="source-edit-head">
+                          <div>
+                            <strong>{edit.filename}</strong>
+                            <span>{edit.kind.toUpperCase()} · {sourceEditStatusLabel(edit.status)}</span>
+                          </div>
+                          <span className={`task-status ${edit.status === "pending" ? "blocked" : edit.status === "applied" ? "completed" : "failed"}`}>
+                            {sourceEditStatusLabel(edit.status)}
+                          </span>
+                        </div>
+                        <p>{edit.summary}</p>
+                        <pre className="edit-diff-preview">{edit.diff_preview || "没有可显示的文本差异预览。"}</pre>
+                        <div className="source-edit-hash">
+                          <small>原 SHA-256 {edit.original_sha256.slice(0, 16)}…</small>
+                          <small>候选 SHA-256 {edit.candidate_sha256.slice(0, 16)}…</small>
+                        </div>
+                        {edit.error_message && <div className="provider-error">{edit.error_message}</div>}
+                        {edit.status === "pending" && (
+                          <div className="button-row">
+                            <button className="primary" disabled={disabled} onClick={() => onConfirmEdit(edit.id, detail.id)}>确认应用</button>
+                            <button className="secondary" disabled={disabled} onClick={() => onRejectEdit(edit.id, detail.id)}>拒绝提案</button>
+                          </div>
+                        )}
+                        {edit.status === "applied" && (
+                          <div className="button-row">
+                            <button className="secondary" disabled={disabled} onClick={() => onRollbackEdit(edit.id, detail.id)}>回滚到修改前</button>
+                            <span className="muted small">{edit.backup_created ? "原文件备份已创建" : "备份状态未知"}</span>
+                          </div>
+                        )}
+                        {edit.status === "rolled_back" && <p className="muted small">已恢复修改前版本。</p>}
+                        {edit.status === "rejected" && <p className="muted small">提案已拒绝，源文件从未被修改。</p>}
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {detail.artifacts.length > 0 && (
                 <div className="artifact-section">
                   <div className="artifact-section-head">
@@ -1450,6 +1576,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 <span>运行 {detail.runs.length} 次</span>
                 <span>工具调用 {detail.tool_calls.length} 次</span>
                 <span>生成文件 {detail.artifacts.length} 个</span>
+                <span>源文件提案 {edits.length} 个</span>
                 <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
               </div>
 
@@ -1501,6 +1628,16 @@ function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
   );
 }
 
+function sourceEditStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "等待确认",
+    applied: "已应用",
+    rejected: "已拒绝",
+    rolled_back: "已回滚",
+  };
+  return labels[status] ?? status;
+}
+
 function taskStatusLabel(status: string) {
   const labels: Record<string, string> = {
     pending: "待执行",
@@ -1523,6 +1660,9 @@ function activityLabel(action: string) {
     tool_completed: "工具调用完成",
     tool_failed: "工具调用失败",
     tool_denied: "工具调用被拒绝",
+    source_edit_applied: "源文件编辑已应用",
+    source_edit_rejected: "源文件编辑已拒绝",
+    source_edit_rolled_back: "源文件编辑已回滚",
   };
   return labels[action] ?? action;
 }
@@ -1596,7 +1736,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 10</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 11</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1608,7 +1748,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
           <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
           <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
-          <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件或系统命令</p>\n          <p><b>✓</b> Phase 10 Web Research 仅通过 Provider 托管搜索，保留 Source；Local Only 禁用，并阻断疑似密钥查询</p>\n          <p><b>✓</b> Web Research 不提供任意 URL 抓取、下载、浏览器控制或网页指令执行</p>
+          <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件或系统命令</p>\n          <p><b>✓</b> Phase 10 Web Research 仅通过 Provider 托管搜索，保留 Source；Local Only 禁用，并阻断疑似密钥查询</p>\n          <p><b>✓</b> Web Research 不提供任意 URL 抓取、下载、浏览器控制或网页指令执行</p>\n          <p><b>✓</b> Phase 11 Agent 只能生成源文件编辑提案，不能直接覆盖源文件</p>\n          <p><b>✓</b> 源文件编辑需目录 write_allowed + 逐次人工确认 + SHA-256 复核 + 自动备份</p>\n          <p><b>✓</b> 已应用编辑只有在文件未再次变化时才允许自动回滚</p>
         </div>
       </article>
     </section>

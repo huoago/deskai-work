@@ -117,7 +117,11 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
             }
             for call in calls
         ]
-        return payload
+    payload["file_edits"] = request.app.state.source_edit_service.list(
+        task_id=task_id,
+        limit=100,
+    )
+    return payload
 
 
 @router.post("/tasks/{task_id}/retry")
