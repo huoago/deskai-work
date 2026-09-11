@@ -12,6 +12,24 @@ class ProviderError(RuntimeError):
 
 
 @dataclass(slots=True)
+class AgentToolRequest:
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(slots=True)
+class AgentResponse:
+    text: str
+    tool_calls: list[AgentToolRequest]
+    output_items: list[dict[str, Any]]
+    response_id: str | None
+    model: str | None
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass(slots=True)
 class ProviderEvent:
     type: str
     text: str = ""
@@ -122,6 +140,66 @@ Use scope=global only for durable cross-project preferences/constraints/workflow
             return memories if isinstance(memories, list) else []
         except (OpenAIError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ProviderError(f"Memory extraction failed: {exc}") from exc
+
+    async def agent_response(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        reasoning_effort: str,
+        instructions: str,
+        input_items: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> AgentResponse:
+        try:
+            client = AsyncOpenAI(api_key=api_key)
+            response = await client.responses.create(
+                model=model,
+                instructions=instructions,
+                input=input_items,
+                reasoning={"effort": reasoning_effort},
+                tools=tools,
+                tool_choice="auto",
+                parallel_tool_calls=False,
+                store=False,
+            )
+            tool_calls: list[AgentToolRequest] = []
+            output_items: list[dict[str, Any]] = []
+            for item in response.output:
+                if hasattr(item, "model_dump"):
+                    output_items.append(item.model_dump(exclude_none=True))
+                item_type = str(getattr(item, "type", ""))
+                if item_type != "function_call":
+                    continue
+                raw_arguments = str(getattr(item, "arguments", "{}") or "{}")
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    raise ProviderError(
+                        f"Agent tool arguments were not valid JSON: {exc}"
+                    ) from exc
+                if not isinstance(arguments, dict):
+                    raise ProviderError("Agent tool arguments must be a JSON object")
+                tool_calls.append(
+                    AgentToolRequest(
+                        call_id=str(getattr(item, "call_id", "") or ""),
+                        name=str(getattr(item, "name", "") or ""),
+                        arguments=arguments,
+                    )
+                )
+
+            usage = getattr(response, "usage", None)
+            return AgentResponse(
+                text=str(response.output_text or ""),
+                tool_calls=tool_calls,
+                output_items=output_items,
+                response_id=getattr(response, "id", None),
+                model=getattr(response, "model", model),
+                input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+                output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+            )
+        except OpenAIError as exc:
+            raise ProviderError(f"Agent response failed: {exc}") from exc
 
     async def stream_response(
         self,
