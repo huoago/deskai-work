@@ -1289,7 +1289,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 17 · AI + 文件事务 + 统一恢复中心</span>
+          <span className="phase-chip">Phase 18 · AI + 文件事务 + 恢复诊断</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -2266,7 +2266,7 @@ function RecoveryPage({
         <div className="panel-head recovery-head">
           <div>
             <h3>统一恢复中心</h3>
-            <p className="muted small">集中查看 Phase 11–16 的已应用编辑、路径事务和回收事务。恢复按钮继续调用原事务 API，不会绕过 SHA、no-overwrite、备份或隔离副本校验。</p>
+            <p className="muted small">集中查看 Phase 11–17 的已应用编辑、路径事务和回收事务。Phase 18 会对 recovery_required 给出只读诊断与人工核对步骤；恢复按钮仍调用原事务 API，不会绕过 SHA、no-overwrite、备份或隔离副本校验。</p>
           </div>
           <div className="recovery-filters">
             {([
@@ -2317,10 +2317,52 @@ function RecoveryPage({
               {entry.paths.slice(0, 2).map((path) => <code className="recovery-path" key={path}>{path}</code>)}
               {entry.error_message && <div className="provider-error">{entry.error_message}</div>}
               {entry.recovery_required && (
-                <div className="recovery-attention-row">
-                  <span className="muted small">自动恢复已停止。请先查看原 Task 与审计记录，核对磁盘实际状态。</span>
-                  {entry.task_id && <button className="secondary" onClick={() => onOpenTask(entry.task_id!)}>查看对应 Task</button>}
-                </div>
+                <>
+                  {entry.diagnostic && (
+                    <div className="recovery-diagnostic">
+                      <div className="recovery-diagnostic-head">
+                        <div>
+                          <span className="eyebrow">Phase 18 · 只读诊断</span>
+                          <strong>{entry.diagnostic.title}</strong>
+                        </div>
+                        <div className="recovery-diagnostic-badges">
+                          <span className="risk-badge">{entry.diagnostic.code}</span>
+                          <span className="risk-badge">置信度 {entry.diagnostic.confidence}</span>
+                        </div>
+                      </div>
+                      <p>{entry.diagnostic.summary}</p>
+                      <div className="recovery-guidance-grid">
+                        <div>
+                          <strong>建议核对顺序</strong>
+                          <ol>
+                            {entry.diagnostic.guided_checks.map((step, index) => (
+                              <li key={`${entry.id}:check:${index}`}>{step}</li>
+                            ))}
+                          </ol>
+                        </div>
+                        <div>
+                          <strong>禁止操作</strong>
+                          <ul>
+                            {entry.diagnostic.prohibited_actions.map((step, index) => (
+                              <li key={`${entry.id}:blocked:${index}`}>{step}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                      <details className="recovery-evidence">
+                        <summary>查看诊断证据</summary>
+                        {entry.diagnostic.evidence.map((value, index) => (
+                          <code key={`${entry.id}:evidence:${index}`}>{value}</code>
+                        ))}
+                      </details>
+                      <p className="muted small">自动修复：关闭。Phase 18 只提供诊断和引导，不会创建 force overwrite、ignore SHA 或直接修改磁盘的新接口。</p>
+                    </div>
+                  )}
+                  <div className="recovery-attention-row">
+                    <span className="muted small">自动恢复已停止。请按上面的诊断顺序核对磁盘实际状态，并结合原 Task 与审计记录处理。</span>
+                    {entry.task_id && <button className="secondary" onClick={() => onOpenTask(entry.task_id!)}>查看对应 Task</button>}
+                  </div>
+                </>
               )}
             </article>
           ))}
@@ -2636,7 +2678,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 16 支持 2–10 文件 All-or-nothing 回收：全部隔离副本验证完成后才允许移除第一个原件</p>
           <p><b>✓</b> 批量回收/恢复中途失败会自动回到完整原件态或完整回收态；歧义状态冻结为 recovery_required</p>
           <p><b>✓</b> Phase 17 恢复中心只聚合既有事务记录，不新增文件写入、删除或绕过确认的能力</p>
-          <p><b>✓</b> recovery_required 只允许查看对应 Task/审计，不提供强制覆盖或跳过 SHA 检查的“修复”按钮</p>
+          <p><b>✓</b> Phase 18 对 recovery_required 仅提供基于持久化事务证据的诊断、核对顺序与禁止操作，不执行自动修复</p>
+          <p><b>✓</b> recovery_required 不提供强制覆盖、忽略 SHA、删除备份/隔离副本或拆分批次的“修复”按钮</p>
         </div>
       </article>
     </section>
