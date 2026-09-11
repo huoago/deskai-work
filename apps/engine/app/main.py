@@ -18,6 +18,7 @@ from app.api.memory import router as memory_router
 from app.api.providers import router as providers_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
+from app.api.source_edits import router as source_edits_router
 from app.api.tasks import router as tasks_router
 from app.api.workspaces import router as workspace_router
 from app.agent.orchestrator import AgentOrchestrator
@@ -36,6 +37,7 @@ from app.memory.service import MemoryService
 from app.memory.worker import MemoryWorker
 from app.parsing.service import ParserWorker
 from app.security.secrets import SecretStore
+from app.source_edits.service import SourceFileEditService
 from app.web.service import WebResearchService
 
 ALLOWED_DESKTOP_ORIGINS = [
