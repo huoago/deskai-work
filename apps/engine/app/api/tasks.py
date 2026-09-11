@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.database.models import AgentRun, AuditLog, Task, ToolCall, Workspace
+from app.api.artifacts import artifact_payload
+from app.database.models import AgentRun, AuditLog, GeneratedArtifact, Task, ToolCall, Workspace
 
 router = APIRouter(tags=["tasks"])
 
@@ -95,6 +96,12 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
             }
             for run in runs
         ]
+        artifacts = session.scalars(
+            select(GeneratedArtifact)
+            .where(GeneratedArtifact.task_id == task_id)
+            .order_by(GeneratedArtifact.created_at)
+        ).all()
+        payload["artifacts"] = [artifact_payload(item) for item in artifacts]
         payload["tool_calls"] = [
             {
                 "id": call.id,

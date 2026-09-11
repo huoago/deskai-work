@@ -8,11 +8,13 @@ from sqlalchemy import or_, select
 from app.database.models import Permission
 from app.database.session import Database
 
-PHASE7_TOOL_POLICY: dict[str, tuple[int, bool]] = {
+AGENT_TOOL_POLICY: dict[str, tuple[int, bool]] = {
     "search_knowledge": (1, False),
     "search_memory": (1, False),
     "list_workspace_files": (2, False),
     "read_parsed_document": (2, False),
+    "create_word_document": (3, False),
+    "create_spreadsheet": (3, False),
 }
 
 
@@ -29,16 +31,16 @@ class PermissionGate:
         self.database = database
 
     def check(self, *, workspace_id: str | None, tool_name: str) -> PermissionDecision:
-        policy = PHASE7_TOOL_POLICY.get(tool_name)
+        policy = AGENT_TOOL_POLICY.get(tool_name)
         if policy is None:
-            return PermissionDecision(False, 8, True, "Tool is not enabled in Phase 7")
+            return PermissionDecision(False, 8, True, "Tool is not enabled by the current Agent policy")
         risk_level, requires_confirmation = policy
         if not workspace_id:
             return PermissionDecision(
                 False,
                 risk_level,
                 requires_confirmation,
-                "Phase 7 tools require an active Workspace",
+                "Agent tools require an active Workspace",
             )
 
         capability = f"agent.tool.{tool_name}"
@@ -70,7 +72,7 @@ class PermissionGate:
             allowed=allowed,
             risk_level=risk_level,
             requires_confirmation=requires_confirmation,
-            reason="Allowed by Phase 7 read-only policy" if allowed else "Explicitly disabled",
+            reason="Allowed by the current scoped Agent policy" if allowed else "Explicitly disabled",
         )
 
 

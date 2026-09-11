@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 6 are complete. Phase 7 audited read-only Agent execution is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 7 are complete. Phase 8 sandboxed Word/Excel artifact generation is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -43,9 +43,14 @@ Implemented foundations:
 - read-only Tool Registry + Permission Gate
 - ToolCall + AuditLog execution history
 - desktop Tasks and Activity audit pages
+- sandboxed generated-artifact registry
+- Agent-created DOCX via python-docx
+- Agent-created XLSX via openpyxl with formula-injection neutralization
+- non-overwriting per-Task generated output directories
+- desktop generated-artifact cards with local path, size and SHA-256
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, and execute audited read-only Agent tasks inside an authorized Workspace. It still does **not** claim neural semantic embeddings, local LLM execution, destructive file actions, arbitrary shell execution, or GUI/browser control yet.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, and create new Word/Excel work artifacts inside a private per-Task sandbox. It still does **not** claim neural semantic embeddings, local LLM execution, source-file overwrite/edit, arbitrary shell execution, or GUI/browser control yet.
 
 ## V1 phase boundaries
 
@@ -56,10 +61,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 4 — Knowledge base:** complete with Chunks, SQLite FTS5, deterministic local vectors, LanceDB, hybrid retrieval, and source citation labels.
 - **Phase 5 — AI chat:** complete with secure provider configuration, Responses API streaming, local RAG grounding, conversation history, and persisted citations.
 - **Phase 6 — Durable memory:** complete with persistent learning jobs, Structured Output extraction, sensitivity gates, correction/version history, retrieval injection, and Memory UI.
-- **Phase 7 — Agent execution:** implemented with persistent Tasks, restart recovery, Responses function calling, a read-only Tool Registry, Permission Gate, ToolCall/AuditLog persistence, and Tasks/Activity UI; gated by CI before merge.
-- Later phases add gated write-capable tools.
+- **Phase 7 — Agent execution:** complete with persistent Tasks, restart recovery, Responses function calling, a read-only Tool Registry, Permission Gate, ToolCall/AuditLog persistence, and Tasks/Activity UI.
+- **Phase 8 — Safe artifacts:** implemented with a generated-artifact registry, sandboxed DOCX/XLSX creation, path traversal protection, no-overwrite semantics, spreadsheet formula-injection neutralization, and artifact UI; gated by CI before merge.
+- Later phases add sandboxed Python/web tools and separately gated source-file write capabilities.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, and `docs/phase7-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, and `docs/phase8-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -125,9 +131,13 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Retrieved document content is treated as untrusted data, never as system instructions.
 - Memory candidates are independently filtered for credentials and sensitive personal information.
 - Memory corrections preserve version history instead of silently erasing the previous value.
-- Phase 7 Agent receives only four read-only Workspace-scoped tools.
+- Agent read tools remain Workspace-scoped.
+- Phase 8 adds only DOCX/XLSX creation inside DeskAI's private generated/<task_id> sandbox.
+- Generated artifact absolute paths remain local and are not returned to the cloud model.
+- Existing generated filenames are never overwritten.
+- Formula-like spreadsheet strings are neutralized before writing.
 - Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
 - Unknown or destructive tool names are denied by default.
-- Destructive file actions are not part of the current phase.
+- Source-file overwrite/edit/delete actions are not part of the current phase.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.

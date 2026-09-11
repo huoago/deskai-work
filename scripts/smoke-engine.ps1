@@ -78,6 +78,20 @@ try {
   }
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
+
+  if ([string]$health.version -ne "0.8.0") {
+    Write-EngineLogs
+    throw "Expected packaged engine version 0.8.0, got $($health.version)."
+  }
+
+  try {
+    $artifacts = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/artifacts" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Artifact API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Artifact endpoint OK: count=$(@($artifacts).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

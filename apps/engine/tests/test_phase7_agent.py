@@ -197,7 +197,7 @@ def test_phase7_permission_gate_denies_unregistered_destructive_tool(client):
     assert call["confirmation_required"] is True
 
     second_input = json.dumps(provider.calls[1]["input_items"], ensure_ascii=False)
-    assert "not enabled in Phase 7" in second_input
+    assert "not enabled by the current Agent policy" in second_input
     activity = client.get("/activity", params={"workspace_id": workspace["id"]}).json()
     assert any(item["action"] == "tool_denied" for item in activity)
 

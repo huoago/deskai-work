@@ -900,7 +900,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 7 · AI + 记忆 + 只读 Agent</span>
+          <span className="phase-chip">Phase 8 · AI + 记忆 + 安全产物 Agent</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1362,7 +1362,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Phase 7 只允许读取知识库、记忆、授权文件清单和解析缓存。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Phase 8 可读取授权资料，并可在 DeskAI 私有生成目录创建新的 Word/Excel 产物；不会覆盖原始资料。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1370,7 +1370,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
           className="task-request"
           value={request}
           onChange={(event) => setRequest(event.target.value)}
-          placeholder="例如：查阅当前项目资料和长期记忆，整理324水表数量、来源及尚待确认的问题。"
+          placeholder="例如：查阅当前项目资料和长期记忆，整理324水表数量、来源及待确认问题，并生成一份Word总结和Excel统计表。"
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onCreate();
           }}
@@ -1419,6 +1419,29 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
 
+              {detail.artifacts.length > 0 && (
+                <div className="artifact-section">
+                  <div className="artifact-section-head">
+                    <strong>生成的工作成果</strong>
+                    <span>{detail.artifacts.length} 个文件</span>
+                  </div>
+                  <div className="artifact-list">
+                    {detail.artifacts.map((artifact) => (
+                      <article className="artifact-card" key={artifact.id}>
+                        <div className="artifact-icon">{artifact.kind === "xlsx" ? "XLSX" : artifact.kind === "docx" ? "DOCX" : artifact.kind.toUpperCase()}</div>
+                        <div className="artifact-info">
+                          <strong>{artifact.filename}</strong>
+                          <span>{formatBytes(artifact.size)} · {formatDate(artifact.created_at)}</span>
+                          <code>{artifact.path}</code>
+                          <small>SHA-256 {artifact.sha256}</small>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <p className="artifact-policy-note">这些文件是 DeskAI 新生成的产物，保存在私有 generated/&lt;task_id&gt; 目录；原始 Workspace 文件没有被覆盖。</p>
+                </div>
+              )}
+
               {["failed", "blocked"].includes(detail.status) && (
                 <button className="secondary" onClick={() => onRetry(detail.id)} disabled={disabled}>重新入队</button>
               )}
@@ -1426,6 +1449,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               <div className="task-run-summary">
                 <span>运行 {detail.runs.length} 次</span>
                 <span>工具调用 {detail.tool_calls.length} 次</span>
+                <span>生成文件 {detail.artifacts.length} 个</span>
                 <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
               </div>
 
@@ -1572,7 +1596,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 7</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 8</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1582,7 +1606,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Local Only 模式不会调用云模型</p>
           <p><b>✓</b> 自动记忆不保存密钥、身份/金融凭据及敏感个人信息</p>
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
-          <p><b>✓</b> Phase 7 Agent 仅开放四个只读工具，全部写入 ToolCall/AuditLog</p>
+          <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
+          <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
         </div>
       </article>
     </section>

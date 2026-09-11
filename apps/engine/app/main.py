@@ -6,6 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app import __version__
+
+from app.api.artifacts import router as artifacts_router
 from app.api.chat import router as chat_router
 from app.api.errors import AppError, app_error_handler
 from app.api.files import router as files_router
@@ -21,6 +24,7 @@ from app.agent.orchestrator import AgentOrchestrator
 from app.agent.tools import ToolRegistry
 from app.agent.worker import AgentWorker
 from app.ai.provider import OpenAIChatProvider
+from app.artifacts.service import ArtifactService
 from app.core.config import Settings
 from app.database.migrate import run_migrations
 from app.database.session import Database
@@ -84,11 +88,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             interval_seconds=resolved.memory_worker_interval_seconds,
         )
         app.state.memory_worker = memory_worker
+        artifact_service = ArtifactService(app.state.database, resolved.data_dir)
+        app.state.artifact_service = artifact_service
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
             memory_service,
             parser_worker.cache,
+            artifact_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(
@@ -126,7 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.7.0",
+        version=__version__,
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -157,6 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.add_exception_handler(AppError, app_error_handler)
     app.include_router(health_router)
+    app.include_router(artifacts_router)
     app.include_router(workspace_router)
     app.include_router(roots_router)
     app.include_router(files_router)

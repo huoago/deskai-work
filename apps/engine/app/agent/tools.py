@@ -35,18 +35,25 @@ class ToolRegistry:
         hybrid_search,
         memory_service,
         parser_cache,
+        artifact_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
         self.memory_service = memory_service
         self.parser_cache = parser_cache
+        self.artifact_service = artifact_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
-        self._handlers: dict[str, Callable[[str, dict[str, Any]], dict[str, Any]]] = {
+        self._handlers: dict[
+            str,
+            Callable[[str, str, dict[str, Any]], dict[str, Any]],
+        ] = {
             "search_knowledge": self._search_knowledge,
             "search_memory": self._search_memory,
             "list_workspace_files": self._list_workspace_files,
             "read_parsed_document": self._read_parsed_document,
+            "create_word_document": self._create_word_document,
+            "create_spreadsheet": self._create_spreadsheet,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -127,7 +134,7 @@ class ToolRegistry:
             )
 
         try:
-            result = handler(str(workspace_id), arguments)
+            result = handler(task_id, str(workspace_id), arguments)
         except Exception as exc:
             return self._record_failure(
                 call_id=call_id,
@@ -190,7 +197,12 @@ class ToolRegistry:
             )
         return {"ok": False, "error": error, "tool_call_id": call_id}
 
-    def _search_knowledge(self, workspace_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _search_knowledge(
+        self,
+        _task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
         query = str(arguments.get("query") or "").strip()
         limit = _bounded_int(arguments.get("limit"), default=6, minimum=1, maximum=8)
         if not query:
@@ -211,7 +223,12 @@ class ToolRegistry:
             )
         return {"query": query, "count": len(distilled), "results": distilled}
 
-    def _search_memory(self, workspace_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    def _search_memory(
+        self,
+        _task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
         query = str(arguments.get("query") or "").strip()
         limit = _bounded_int(arguments.get("limit"), default=6, minimum=1, maximum=8)
         if not query:
@@ -225,6 +242,7 @@ class ToolRegistry:
 
     def _list_workspace_files(
         self,
+        _task_id: str,
         workspace_id: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
@@ -257,6 +275,7 @@ class ToolRegistry:
 
     def _read_parsed_document(
         self,
+        _task_id: str,
         workspace_id: str,
         arguments: dict[str, Any],
     ) -> dict[str, Any]:
@@ -295,6 +314,53 @@ class ToolRegistry:
             "units": units[:max_units],
             "units_truncated": len(units) > max_units,
         }
+
+
+    def _create_word_document(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        sections = arguments.get("sections")
+        if not isinstance(sections, list):
+            raise ValueError("sections must be a list")
+        artifact = self.artifact_service.create_word_document(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            filename=str(arguments.get("filename") or "deskai-output.docx"),
+            title=str(arguments.get("title") or ""),
+            sections=sections,
+        )
+        return _artifact_payload(artifact)
+
+    def _create_spreadsheet(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        sheets = arguments.get("sheets")
+        if not isinstance(sheets, list):
+            raise ValueError("sheets must be a list")
+        artifact = self.artifact_service.create_spreadsheet(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            filename=str(arguments.get("filename") or "deskai-output.xlsx"),
+            sheets=sheets,
+        )
+        return _artifact_payload(artifact)
+
+
+def _artifact_payload(artifact) -> dict[str, Any]:
+    return {
+        "artifact_id": artifact.id,
+        "kind": artifact.kind,
+        "filename": artifact.filename,
+        "mime_type": artifact.mime_type,
+        "sha256": artifact.sha256,
+        "size": artifact.size,
+    }
 
 
 def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
@@ -374,6 +440,70 @@ def _tool_specs() -> list[ToolSpec]:
                     "max_units": {"type": "integer", "minimum": 1, "maximum": 40},
                 },
                 "required": ["file_id", "max_chars", "max_units"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="create_word_document",
+            description="Create a new DOCX artifact inside DeskAI's private generated/task directory. Never writes to source Workspace folders and never overwrites an existing file.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "title": {"type": "string", "maxLength": 500},
+                    "sections": {
+                        "type": "array",
+                        "maxItems": 30,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "heading": {"type": "string", "maxLength": 500},
+                                "body": {"type": "string", "maxLength": 30000},
+                            },
+                            "required": ["heading", "body"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["filename", "title", "sections"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="create_spreadsheet",
+            description="Create a new XLSX artifact inside DeskAI's private generated/task directory. Cell values are treated as data, formulas are not executed, and existing files are never overwritten.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "sheets": {
+                        "type": "array",
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "minLength": 1, "maxLength": 100},
+                                "headers": {
+                                    "type": "array",
+                                    "maxItems": 50,
+                                    "items": {"type": "string", "maxLength": 1000},
+                                },
+                                "rows": {
+                                    "type": "array",
+                                    "maxItems": 2000,
+                                    "items": {
+                                        "type": "array",
+                                        "maxItems": 50,
+                                        "items": {"type": "string", "maxLength": 10000},
+                                    },
+                                },
+                            },
+                            "required": ["name", "headers", "rows"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["filename", "sheets"],
                 "additionalProperties": False,
             },
         ),
