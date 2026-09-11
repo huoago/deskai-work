@@ -242,9 +242,23 @@ export type AgentToolCallRecord = {
   completed_at: string | null;
 };
 
+export type GeneratedArtifactRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  kind: "docx" | "xlsx" | string;
+  filename: string;
+  path: string;
+  mime_type: string;
+  sha256: string;
+  size: number;
+  created_at: string;
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
+  artifacts: GeneratedArtifactRecord[];
 };
 
 export type AgentStatus = {
@@ -541,6 +555,14 @@ export function processAgentQueue(limit = 10): Promise<{ processed: number; stat
 export function listActivity(workspaceId?: string): Promise<ActivityRecord[]> {
   const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
   return request<ActivityRecord[]>(`/activity${suffix}`);
+}
+
+export function listGeneratedArtifacts(workspaceId?: string, taskId?: string): Promise<GeneratedArtifactRecord[]> {
+  const params = new URLSearchParams();
+  if (workspaceId) params.set("workspace_id", workspaceId);
+  if (taskId) params.set("task_id", taskId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request<GeneratedArtifactRecord[]>(`/artifacts${suffix}`);
 }
 
 export function getDesktopSettings(): Promise<DesktopSettings> {
