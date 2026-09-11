@@ -341,6 +341,54 @@ def test_phase16_second_restore_failure_returns_first_member_to_recycled_state(
     assert all(Path(item["quarantine_path"]).is_file() for item in current["items"])
 
 
+def test_phase16_restore_failure_with_unexpected_current_member_requires_recovery(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    workspace, files, task, _root_path, alpha, beta = _workspace_with_files(
+        client,
+        tmp_path,
+    )
+    batch = _batch(client, workspace, files, task)
+    assert client.post(f"/recycle-batches/{batch['id']}/confirm").status_code == 200
+
+    recycle_service = client.app.state.file_recycle_service
+    original_restore = recycle_service._restore_copy_no_overwrite
+    calls = 0
+
+    def corrupting_restore(
+        quarantine: Path,
+        original: Path,
+        expected_sha: str,
+    ) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            original.write_text("unexpected concurrent content\n", encoding="utf-8")
+            raise OSError("simulated restore race after original path appeared")
+        original_restore(quarantine, original, expected_sha)
+
+    monkeypatch.setattr(
+        recycle_service,
+        "_restore_copy_no_overwrite",
+        corrupting_restore,
+    )
+
+    response = client.post(f"/recycle-batches/{batch['id']}/restore")
+    assert response.status_code == 409
+    assert "manual recovery is required" in response.json()["detail"]
+
+    # The first safely restored member is rolled back to recycled state.
+    assert not alpha.exists()
+    # Unexpected content is never deleted automatically.
+    assert beta.read_text(encoding="utf-8") == "unexpected concurrent content\n"
+
+    current = client.get(f"/recycle-batches/{batch['id']}").json()
+    assert current["status"] == "recovery_required"
+    assert all(Path(item["quarantine_path"]).is_file() for item in current["items"])
+
+
 def test_phase16_startup_recovery_restores_partial_recycle_to_pending(
     client,
     tmp_path,
