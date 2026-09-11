@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 9 are complete. Phase 10 controlled web research is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 10 are complete and merged to `main`.**
 
 Implemented foundations:
 
@@ -69,7 +69,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 7 — Agent execution:** complete with persistent Tasks, restart recovery, Responses function calling, a read-only Tool Registry, Permission Gate, ToolCall/AuditLog persistence, and Tasks/Activity UI.
 - **Phase 8 — Safe artifacts:** complete with a generated-artifact registry, sandboxed DOCX/XLSX creation, path traversal protection, no-overwrite semantics, spreadsheet formula-injection neutralization, and artifact UI.
 - **Phase 9 — Controlled analysis:** complete with a bounded AST numeric evaluator plus Workspace-scoped CSV/XLSX inspect, summary, and grouped aggregation tools.
-- **Phase 10 — Controlled web research:** implemented with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating; gated by CI before merge.
+- **Phase 10 — Controlled web research:** complete with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating.
 - Later phases add stronger OS-isolated computation and separately gated source-file write capabilities.
 
 See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, and `docs/phase10-status.md` for the current implementation.
