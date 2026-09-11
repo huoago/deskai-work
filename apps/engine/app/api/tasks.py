@@ -125,6 +125,10 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
         task_id=task_id,
         limit=100,
     )
+    payload["file_operations"] = request.app.state.file_organization_service.list(
+        task_id=task_id,
+        limit=100,
+    )
     return payload
 
 
