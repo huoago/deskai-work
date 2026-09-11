@@ -37,9 +37,15 @@ class FileRecycleService:
         source_edit_service: SourceFileEditService,
     ) -> None:
         self.database = database
-        self.data_dir = data_dir
+        self.data_dir = data_dir.resolve()
         self.source_edit_service = source_edit_service
-        self.recycle_root = data_dir / "recycle_bin"
+        raw_recycle_root = self.data_dir / "recycle_bin"
+        if raw_recycle_root.is_symlink():
+            raise ValueError("DeskAI recycle root cannot be a symlink")
+        raw_recycle_root.mkdir(parents=True, exist_ok=True)
+        self.recycle_root = raw_recycle_root.resolve(strict=True)
+        if not self.recycle_root.is_relative_to(self.data_dir):
+            raise ValueError("DeskAI recycle root escaped the private data directory")
 
     def propose(
         self,
@@ -64,12 +70,9 @@ class FileRecycleService:
             )
 
         proposal_id = str(uuid.uuid4())
-        quarantine = (
-            self.recycle_root
-            / workspace_id
-            / proposal_id
-            / source.name
-        ).resolve(strict=False)
+        quarantine = self._assert_quarantine_path(
+            self.recycle_root / workspace_id / proposal_id / source.name
+        )
         proposal = FileRecycleProposal(
             id=proposal_id,
             task_id=task_id,
@@ -257,7 +260,9 @@ class FileRecycleService:
                         continue
                     status = proposal.status
                     original = Path(proposal.original_path)
-                    quarantine = Path(proposal.quarantine_path)
+                    quarantine = self._assert_quarantine_path(
+                        Path(proposal.quarantine_path)
+                    )
                     expected_sha = proposal.original_sha256
 
                 original_ok = (
@@ -474,7 +479,9 @@ class FileRecycleService:
                 "file_id": proposal.file_id,
                 "source": source,
                 "original": source,
-                "quarantine": Path(proposal.quarantine_path).resolve(strict=False),
+                "quarantine": self._assert_quarantine_path(
+                    Path(proposal.quarantine_path)
+                ),
                 "original_sha256": proposal.original_sha256,
                 "previous_file_status": proposal.previous_file_status,
                 "root": root,
@@ -742,13 +749,24 @@ class FileRecycleService:
                 "File already has an active edit, organization, or recycle proposal"
             )
 
-    @staticmethod
-    def _require_quarantine_path(value: str) -> Path:
+    def _assert_quarantine_path(self, path: Path) -> Path:
         try:
-            path = Path(value)
+            resolved = path.resolve(strict=False)
+            resolved.relative_to(self.recycle_root)
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                "Quarantine path escaped the DeskAI private recycle directory"
+            ) from exc
+        return resolved
+
+    def _require_quarantine_path(self, value: str) -> Path:
+        try:
+            path = self._assert_quarantine_path(Path(value))
             if path.is_symlink():
                 raise ValueError("Quarantine copy cannot be a symlink")
-            return path.resolve(strict=True)
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(self.recycle_root)
+            return resolved
         except OSError as exc:
             raise ValueError("Quarantine copy is missing or inaccessible") from exc
 
@@ -767,8 +785,8 @@ class FileRecycleService:
     def _ensure_source_available(self, source: Path) -> None:
         self.source_edit_service.probe_source_available(source)
 
-    @staticmethod
-    def _verify_quarantine(quarantine: Path, expected_sha: str) -> None:
+    def _verify_quarantine(self, quarantine: Path, expected_sha: str) -> None:
+        quarantine = self._assert_quarantine_path(quarantine)
         if not quarantine.is_file() or quarantine.is_symlink():
             raise ValueError("Verified quarantine copy is missing")
         if sha256_file(quarantine) != expected_sha:
@@ -780,7 +798,9 @@ class FileRecycleService:
         quarantine: Path,
         expected_sha: str,
     ) -> None:
+        quarantine = self._assert_quarantine_path(quarantine)
         quarantine.parent.mkdir(parents=True, exist_ok=True)
+        quarantine = self._assert_quarantine_path(quarantine)
         if quarantine.exists() or quarantine.is_symlink():
             self._verify_quarantine(quarantine, expected_sha)
             return
