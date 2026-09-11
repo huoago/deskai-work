@@ -19,7 +19,7 @@ AGENT_TOOL_POLICY: dict[str, tuple[int, bool]] = {
     "inspect_table": (1, False),
     "summarize_table": (1, False),
     "aggregate_table": (1, False),
-    "search_web": (2, False),
+    "search_web": (2, False),\n    "propose_source_file_edit": (3, False),
 }
 
 
