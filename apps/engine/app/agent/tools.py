@@ -42,6 +42,7 @@ class ToolRegistry:
         source_edit_batch_service,
         file_organization_service,
         file_organization_batch_service,
+        file_recycle_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
@@ -54,6 +55,7 @@ class ToolRegistry:
         self.source_edit_batch_service = source_edit_batch_service
         self.file_organization_service = file_organization_service
         self.file_organization_batch_service = file_organization_batch_service
+        self.file_recycle_service = file_recycle_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -75,6 +77,7 @@ class ToolRegistry:
             "propose_source_file_edit_batch": self._propose_source_file_edit_batch,
             "propose_file_organization": self._propose_file_organization,
             "propose_file_organization_batch": self._propose_file_organization_batch,
+            "propose_file_recycle": self._propose_file_recycle,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -505,6 +508,19 @@ class ToolRegistry:
             workspace_id=workspace_id,
             summary=str(arguments.get("summary") or ""),
             operations=operations,
+        )
+
+    def _propose_file_recycle(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.file_recycle_service.propose(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            file_id=str(arguments.get("file_id") or ""),
+            summary=str(arguments.get("summary") or ""),
         )
 
     def _aggregate_table(
@@ -1013,6 +1029,29 @@ def _tool_specs() -> list[ToolSpec]:
                     },
                 },
                 "required": ["summary", "operations"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="propose_file_recycle",
+            description=(
+                "Stage a recoverable recycle proposal for one existing Workspace file. "
+                "This tool NEVER deletes or moves the source by itself. After explicit "
+                "desktop confirmation, DeskAI first creates and SHA-verifies a private "
+                "quarantine copy, then removes the Workspace original. The quarantined "
+                "copy remains restorable. Permanent deletion is not available."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "minLength": 1},
+                    "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                    },
+                },
+                "required": ["file_id", "summary"],
                 "additionalProperties": False,
             },
         ),
