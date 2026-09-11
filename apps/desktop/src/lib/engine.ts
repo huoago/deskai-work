@@ -314,6 +314,7 @@ export type FileOrganizationRecord = {
   task_id: string;
   workspace_id: string;
   file_id: string;
+  batch_id: string | null;
   filename: string;
   operation: "rename" | "move" | string;
   status:
@@ -341,6 +342,34 @@ export type FileOrganizationRecord = {
   recovery_required: boolean;
 };
 
+export type FileOrganizationBatchRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  status:
+    | "pending"
+    | "applying"
+    | "applied"
+    | "rolling_back"
+    | "rolled_back"
+    | "rejected"
+    | "recovery_required"
+    | string;
+  summary: string;
+  operation_count: number;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  applied_at: string | null;
+  rejected_at: string | null;
+  rolled_back_at: string | null;
+  requires_user_confirmation: boolean;
+  can_rollback: boolean;
+  recovery_required: boolean;
+  transactional: boolean;
+  operations: FileOrganizationRecord[];
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
@@ -348,6 +377,7 @@ export type TaskDetail = TaskRecord & {
   file_edits: SourceFileEditRecord[];
   file_edit_batches: SourceFileEditBatchRecord[];
   file_operations: FileOrganizationRecord[];
+  file_operation_batches: FileOrganizationBatchRecord[];
 };
 
 export type AgentStatus = {
@@ -666,6 +696,18 @@ export function rejectFileOrganization(proposalId: string): Promise<FileOrganiza
 
 export function rollbackFileOrganization(proposalId: string): Promise<FileOrganizationRecord> {
   return request<FileOrganizationRecord>(`/file-operations/${proposalId}/rollback`, { method: "POST" });
+}
+
+export function confirmFileOrganizationBatch(batchId: string): Promise<FileOrganizationBatchRecord> {
+  return request<FileOrganizationBatchRecord>(`/file-operation-batches/${batchId}/confirm`, { method: "POST" });
+}
+
+export function rejectFileOrganizationBatch(batchId: string): Promise<FileOrganizationBatchRecord> {
+  return request<FileOrganizationBatchRecord>(`/file-operation-batches/${batchId}/reject`, { method: "POST" });
+}
+
+export function rollbackFileOrganizationBatch(batchId: string): Promise<FileOrganizationBatchRecord> {
+  return request<FileOrganizationBatchRecord>(`/file-operation-batches/${batchId}/rollback`, { method: "POST" });
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {
