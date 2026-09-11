@@ -309,12 +309,45 @@ export type SourceFileEditBatchRecord = {
   edits: SourceFileEditRecord[];
 };
 
+export type FileOrganizationRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  file_id: string;
+  filename: string;
+  operation: "rename" | "move" | string;
+  status:
+    | "pending"
+    | "applying"
+    | "applied"
+    | "rolling_back"
+    | "rolled_back"
+    | "rejected"
+    | "recovery_required"
+    | string;
+  summary: string;
+  original_path: string;
+  target_path: string;
+  original_sha256: string;
+  applied_sha256: string | null;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  applied_at: string | null;
+  rejected_at: string | null;
+  rolled_back_at: string | null;
+  requires_user_confirmation: boolean;
+  can_rollback: boolean;
+  recovery_required: boolean;
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
   artifacts: GeneratedArtifactRecord[];
   file_edits: SourceFileEditRecord[];
   file_edit_batches: SourceFileEditBatchRecord[];
+  file_operations: FileOrganizationRecord[];
 };
 
 export type AgentStatus = {
@@ -621,6 +654,18 @@ export function rejectSourceFileEditBatch(batchId: string): Promise<SourceFileEd
 
 export function rollbackSourceFileEditBatch(batchId: string): Promise<SourceFileEditBatchRecord> {
   return request<SourceFileEditBatchRecord>(`/file-edit-batches/${batchId}/rollback`, { method: "POST" });
+}
+
+export function confirmFileOrganization(proposalId: string): Promise<FileOrganizationRecord> {
+  return request<FileOrganizationRecord>(`/file-operations/${proposalId}/confirm`, { method: "POST" });
+}
+
+export function rejectFileOrganization(proposalId: string): Promise<FileOrganizationRecord> {
+  return request<FileOrganizationRecord>(`/file-operations/${proposalId}/reject`, { method: "POST" });
+}
+
+export function rollbackFileOrganization(proposalId: string): Promise<FileOrganizationRecord> {
+  return request<FileOrganizationRecord>(`/file-operations/${proposalId}/rollback`, { method: "POST" });
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {
