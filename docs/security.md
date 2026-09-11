@@ -538,3 +538,20 @@ Recovery Center does **not** expose a "force", "ignore hash", "overwrite", or "m
 The operator may open the associated Task and review AuditLog history, but any filesystem repair outside verified DeskAI automation remains an explicit manual action.
 
 Phase 17 does not add permanent deletion, quarantine purge, directory mutation, arbitrary path access, shell execution, unrestricted Python, or browser/GUI automation.
+
+
+## Phase 18 — Recovery diagnostics and guided repair
+
+Phase 18 does not introduce a mutation API. It derives structured diagnostics only from already-persisted recovery transaction records.
+
+Security invariants:
+
+- only `recovery_required` entries receive guided diagnostics;
+- normal rollback/restore remains exclusively on the original Phase 11–16 services;
+- diagnostic output never changes files, database transaction status, Workspace permissions, backup data, or quarantine data;
+- automatic repair is explicitly unavailable;
+- force overwrite and ignore-SHA behavior remain unavailable;
+- occupied targets are preserved rather than overwritten;
+- backup/quarantine copies must be preserved during manual investigation;
+- transactional batches must be investigated as a whole rather than member-by-member;
+- unknown failures degrade to a low-confidence manual-review classification rather than guessing a destructive fix.
