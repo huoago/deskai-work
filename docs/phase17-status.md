@@ -1,6 +1,6 @@
 # Phase 17 — Unified recovery center
 
-Status: implemented on the Phase 17 branch and pending full CI verification.
+Status: complete, fully verified, and merged to `main`.
 
 ## Objective
 
@@ -98,14 +98,34 @@ Phase 17 tests cover:
 - global sort + limit across transaction families;
 - `/recovery` has no POST or DELETE mutation surface.
 
-Required CI gates:
+### Merge verification
 
-- Ruff;
-- full Engine Pytest suite;
-- TypeScript typecheck;
-- Vite production build;
-- Windows PyInstaller sidecar;
-- packaged Engine 0.17.0 smoke;
-- packaged `/recovery` API smoke;
-- Tauri NSIS/MSI;
-- Windows Artifact upload.
+Feature PR #29 passed the complete CI pipeline on Run #88 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **120 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.17.0** health smoke — passed;
+- packaged `/recycle-batches` API smoke — passed;
+- packaged `/recovery` API smoke — passed;
+- Tauri Windows NSIS build — passed;
+- Tauri Windows MSI build — passed;
+- Windows Artifact upload — passed.
+
+Verified Windows installers:
+
+- `DeskAI Work_0.1.0_x64-setup.exe`;
+- `DeskAI Work_0.1.0_x64_en-US.msi`.
+
+Feature PR #29 was squash merged to `main` as:
+
+`bf6b9f75a8a9256fc90fb231ec1341793a91901c`
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10286965190`;
+- size: `394369343` bytes;
+- SHA-256: `be1d550728eb8c8714ccf355f6e7c851ecb38dfb4b54cf40015445eb71deaddb`.

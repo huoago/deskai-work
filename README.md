@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 16 are complete, fully verified, and merged to `main`. Phase 17 unified recovery center is implemented and pending full CI verification.**
+**Phase 0 through Phase 17 are complete, fully verified, and merged to `main`.**
 
 Implemented foundations:
 
@@ -86,7 +86,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 14 — Transactional file organization:** complete with 2–10 independent rename/move proposals, unique absent targets, all-member preflight, single-confirm all-or-nothing execution, failure rollback, batch startup recovery, batch rollback, 90 passing Engine tests, packaged Engine 0.14.0 smoke verification, and verified Windows installers.
 - **Phase 15 — Controlled recycle bin:** complete with proposal-only single-file recycle, verified private quarantine copy before source removal, post-copy source SHA revalidation, quarantine sandbox containment, recycled metadata state, restore-to-original with no-overwrite semantics, startup recovery, cross-tool mutation exclusivity, no permanent purge capability, 102 passing Engine tests, packaged Engine 0.15.0 smoke verification, and verified Windows installers.
 - **Phase 16 — Transactional batch recycle:** complete with 2–10 unique files, all-member preflight, all quarantine copies verified before the first Workspace original is removed, post-staging SHA revalidation, all-or-nothing recycle/restore rollback, startup recovery, unexpected-content recovery freeze, no permanent purge capability, 115 passing Engine tests, packaged Engine 0.16.0 smoke verification, and verified Windows installers.
-- **Phase 17 — Unified recovery center:** implemented as a read-only Workspace-scoped aggregation of Phase 11–16 applied/recycled/recovery-required transactions, with desktop filters and rollback/restore buttons that call the original transaction APIs; pending full CI verification.
+- **Phase 17 — Unified recovery center:** complete with read-only Workspace-scoped aggregation of Phase 11–16 applied/recycled/recovery-required transactions, desktop recoverable/attention/history filters, rollback/restore buttons that reuse the original transaction APIs, 120 passing Engine tests, packaged Engine 0.17.0 recovery smoke verification, and verified Windows installers.
 
 See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, and `docs/phase17-status.md` for the current implementation.
 
