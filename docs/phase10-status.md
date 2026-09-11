@@ -1,6 +1,6 @@
 # Phase 10 — Controlled web research
 
-Status: implemented on the Phase 10 branch and pending CI verification.
+Status: complete and merged to `main` after all required CI gates passed.
 
 ## Objective
 
@@ -119,7 +119,7 @@ Phase 10 tests cover:
 - registration of the tool in the model-visible Tool Registry;
 - no real OpenAI credential or real network call in tests.
 
-CI must still pass:
+Verified CI gates:
 
 - Ruff;
 - full Engine Pytest suite;
