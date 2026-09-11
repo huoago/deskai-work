@@ -140,8 +140,10 @@ class SourceFileEditService:
 
         backup.parent.mkdir(parents=True, exist_ok=True)
         if backup.exists():
-            raise ValueError("Backup already exists for this edit proposal")
-        shutil.copy2(source, backup)
+            if not backup.is_file() or sha256_file(backup) != snapshot["original_sha256"]:
+                raise ValueError("Existing edit backup is invalid or corrupted")
+        else:
+            shutil.copy2(source, backup)
         self._atomic_replace(candidate, source)
 
         applied_sha = sha256_file(source)
