@@ -416,3 +416,77 @@ Phase 15 intentionally exposes **no** API or Agent tool that deletes a quarantin
 There is no recycle purge endpoint, no retention timer, no scheduled cleanup, and no permanent-delete tool.
 
 A later phase may introduce separately confirmed retention/purge policy, but it must be designed as an independent higher-risk capability rather than reusing the recoverable recycle action.
+
+
+## Transactional recycle-batch boundary
+
+Phase 16 extends the Phase 15 recoverable recycle model to one coordinated transaction containing 2–10 Workspace files.
+
+The Agent receives only `propose_file_recycle_batch`, an L5 staging tool. It can create a batch proposal but cannot remove any Workspace file.
+
+Each member independently inherits every Phase 15 constraint:
+
+- active Workspace ownership;
+- containing root is readable and `write_allowed=true`;
+- regular non-symlink source;
+- current on-disk SHA-256 matches DeskAI's File record;
+- no parser/indexer processing job;
+- no active edit, organization, or recycle proposal;
+- private quarantine path is contained inside DeskAI's recycle sandbox.
+
+A batch additionally requires:
+
+- 2–10 unique File ids;
+- unique source paths;
+- every member belongs to the same task / Workspace;
+- members cannot be confirmed, rejected, or restored through the single-file API.
+
+### Confirmed batch recycle
+
+Before the first Workspace source is removed, DeskAI performs the following complete sequence:
+
+1. preflight every member for path, Workspace write permission, SHA freshness, processing state, source writeability, and Office lock state;
+2. persist the batch and all members as `recycling`;
+3. create and SHA-verify a private quarantine copy for **every** member;
+4. after all quarantine copies exist, re-check processing/writeability and recompute every source SHA-256;
+5. only then begin removing Workspace originals one by one.
+
+This ordering is the key Phase 16 invariant: **no Workspace original may be removed until every batch member already has a verified quarantine copy.**
+
+After each source removal, DeskAI again verifies that member's quarantine copy.
+
+If a later source removal or verification fails, every already-removed member is recreated from its verified quarantine copy in reverse order.
+
+When rollback restores every original, the entire batch returns to `pending`; quarantine copies may remain for a safe retry.
+
+If automatic rollback cannot prove a complete original-path state, the batch enters `recovery_required` and no further automatic mutation occurs.
+
+Database finalization is also guarded. If filesystem removal completed but metadata commit fails, DeskAI attempts to restore every original before returning the batch to `pending`.
+
+### Transactional batch restore
+
+A recycled batch can only be restored as one unit.
+
+Before the first original is recreated, DeskAI verifies:
+
+- every quarantine copy exists and matches its recorded SHA-256;
+- every original parent still exists and is writable;
+- every original path is unoccupied.
+
+DeskAI then restores members with no-overwrite semantics while retaining all quarantine copies.
+
+If a later restore fails, already-restored originals are SHA-checked and removed again so the entire batch returns to its previous `recycled` state.
+
+If rollback to the recycled state is incomplete or ambiguous, the batch enters `recovery_required`.
+
+### Interrupted-process recovery
+
+Phase 16 batch recovery runs before Phase 15 individual recycle recovery.
+
+For an interrupted `recycling` batch, DeskAI converges to the safe pre-commit state: any members whose Workspace originals were already removed are restored from quarantine, and the entire batch returns to `pending`.
+
+For an interrupted `restoring` batch, DeskAI completes restoration of any missing originals and finalizes the batch as `restored`.
+
+Automatic recovery acts only on exact expected SHA-256 states. Unexpected content, missing required quarantine copies, symlinks, or ambiguous original/quarantine combinations freeze the batch as `recovery_required`.
+
+Phase 16 still exposes no permanent-delete/purge endpoint, retention timer, scheduled quarantine cleanup, directory deletion, arbitrary unlink, shell execution, unrestricted Python, or browser/GUI control.
