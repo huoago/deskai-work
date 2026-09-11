@@ -54,6 +54,7 @@ class FileOrganizationService:
         summary: str,
         new_name: str,
         target_relative_dir: str,
+        batch_id: str | None = None,
     ) -> dict[str, Any]:
         file, root, source = self.source_edit_service._editable_file(
             task_id=task_id,
@@ -90,6 +91,7 @@ class FileOrganizationService:
             task_id=task_id,
             workspace_id=workspace_id,
             file_id=file_id,
+            batch_id=batch_id,
             operation=operation,
             status="pending",
             summary=normalized_summary,
@@ -104,6 +106,7 @@ class FileOrganizationService:
         return self.payload(proposal, filename=file.filename)
 
     def confirm(self, proposal_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(proposal_id)
         snapshot = self._action_snapshot(proposal_id, expected_status="pending")
         source = snapshot["source"]
         target = snapshot["target"]
@@ -183,6 +186,7 @@ class FileOrganizationService:
         return self.get(proposal_id)
 
     def reject(self, proposal_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(proposal_id)
         now = datetime.now(timezone.utc)
         with self.database.session() as session:
             proposal = session.get(FileOrganizationProposal, proposal_id)
@@ -205,6 +209,7 @@ class FileOrganizationService:
         return self.get(proposal_id)
 
     def rollback(self, proposal_id: str) -> dict[str, Any]:
+        self._ensure_individual_action(proposal_id)
         snapshot = self._action_snapshot(proposal_id, expected_status="applied")
         current = snapshot["source"]
         original = snapshot["target"]
@@ -300,7 +305,8 @@ class FileOrganizationService:
                 item.id
                 for item in session.scalars(
                     select(FileOrganizationProposal).where(
-                        FileOrganizationProposal.status.in_(["applying", "rolling_back"])
+                        FileOrganizationProposal.batch_id.is_(None),
+                        FileOrganizationProposal.status.in_(["applying", "rolling_back"]),
                     )
                 ).all()
             ]
@@ -444,6 +450,7 @@ class FileOrganizationService:
             "task_id": proposal.task_id,
             "workspace_id": proposal.workspace_id,
             "file_id": proposal.file_id,
+            "batch_id": proposal.batch_id,
             "filename": filename,
             "operation": proposal.operation,
             "status": proposal.status,
@@ -468,6 +475,17 @@ class FileOrganizationService:
             "can_rollback": proposal.status == "applied",
             "recovery_required": proposal.status == "recovery_required",
         }
+
+    def _ensure_individual_action(self, proposal_id: str) -> None:
+        with self.database.session() as session:
+            proposal = session.get(FileOrganizationProposal, proposal_id)
+            if proposal is None:
+                raise ValueError("File organization proposal not found")
+            if proposal.batch_id:
+                raise ValueError(
+                    "This file organization proposal belongs to a transactional batch "
+                    "and must be acted on through the batch"
+                )
 
     def _action_snapshot(
         self,
@@ -523,6 +541,7 @@ class FileOrganizationService:
                 "task_id": proposal.task_id,
                 "workspace_id": proposal.workspace_id,
                 "file_id": proposal.file_id,
+                "batch_id": proposal.batch_id,
                 "operation": proposal.operation,
                 "source": current,
                 "target": (
