@@ -325,6 +325,25 @@ class FileOrganizationProposal(Base):
     rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class FileRecycleBatch(Base):
+    __tablename__ = "file_recycle_batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recycled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class FileRecycleProposal(Base):
     __tablename__ = "file_recycle_proposals"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
@@ -334,6 +353,7 @@ class FileRecycleProposal(Base):
         index=True,
     )
     file_id: Mapped[str] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), index=True)
+    batch_id: Mapped[str | None] = mapped_column(String(36), index=True)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     original_path: Mapped[str] = mapped_column(Text, nullable=False)

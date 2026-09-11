@@ -43,6 +43,7 @@ class ToolRegistry:
         file_organization_service,
         file_organization_batch_service,
         file_recycle_service,
+        file_recycle_batch_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
@@ -56,6 +57,7 @@ class ToolRegistry:
         self.file_organization_service = file_organization_service
         self.file_organization_batch_service = file_organization_batch_service
         self.file_recycle_service = file_recycle_service
+        self.file_recycle_batch_service = file_recycle_batch_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -78,6 +80,7 @@ class ToolRegistry:
             "propose_file_organization": self._propose_file_organization,
             "propose_file_organization_batch": self._propose_file_organization_batch,
             "propose_file_recycle": self._propose_file_recycle,
+            "propose_file_recycle_batch": self._propose_file_recycle_batch,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -521,6 +524,22 @@ class ToolRegistry:
             workspace_id=workspace_id,
             file_id=str(arguments.get("file_id") or ""),
             summary=str(arguments.get("summary") or ""),
+        )
+
+    def _propose_file_recycle_batch(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        items = arguments.get("items") or []
+        if not isinstance(items, list):
+            raise ValueError("items must be a list")
+        return self.file_recycle_batch_service.propose(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            summary=str(arguments.get("summary") or ""),
+            items=items,
         )
 
     def _aggregate_table(
@@ -1052,6 +1071,46 @@ def _tool_specs() -> list[ToolSpec]:
                     },
                 },
                 "required": ["file_id", "summary"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="propose_file_recycle_batch",
+            description=(
+                "Stage one recoverable recycle transaction for 2-10 existing Workspace "
+                "files. This tool NEVER removes files. After one explicit desktop "
+                "confirmation, DeskAI must prepare and SHA-verify quarantine copies for "
+                "every member before removing any Workspace original. The whole batch "
+                "remains restorable and permanent deletion is unavailable."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                    },
+                    "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "file_id": {"type": "string", "minLength": 1},
+                                "summary": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 1000,
+                                },
+                            },
+                            "required": ["file_id", "summary"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["summary", "items"],
                 "additionalProperties": False,
             },
         ),

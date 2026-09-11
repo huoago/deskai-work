@@ -111,6 +111,7 @@ export type SearchHit = {
 
 export type ParsedPreview = {
   file_id: string;
+  batch_id: string | null;
   filename: string;
   sha256: string;
   parser: string;
@@ -375,6 +376,7 @@ export type FileRecycleRecord = {
   task_id: string;
   workspace_id: string;
   file_id: string;
+  batch_id: string | null;
   filename: string;
   status:
     | "pending"
@@ -403,6 +405,35 @@ export type FileRecycleRecord = {
   permanent_delete_available: boolean;
 };
 
+export type FileRecycleBatchRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  status:
+    | "pending"
+    | "recycling"
+    | "recycled"
+    | "restoring"
+    | "restored"
+    | "rejected"
+    | "recovery_required"
+    | string;
+  summary: string;
+  item_count: number;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  recycled_at: string | null;
+  rejected_at: string | null;
+  restored_at: string | null;
+  requires_user_confirmation: boolean;
+  can_restore: boolean;
+  recovery_required: boolean;
+  permanent_delete_available: boolean;
+  transactional: boolean;
+  items: FileRecycleRecord[];
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
@@ -412,6 +443,7 @@ export type TaskDetail = TaskRecord & {
   file_operations: FileOrganizationRecord[];
   file_operation_batches: FileOrganizationBatchRecord[];
   recycle_proposals: FileRecycleRecord[];
+  recycle_batches: FileRecycleBatchRecord[];
 };
 
 export type AgentStatus = {
@@ -754,6 +786,18 @@ export function rejectRecycleProposal(proposalId: string): Promise<FileRecycleRe
 
 export function restoreRecycledFile(proposalId: string): Promise<FileRecycleRecord> {
   return request<FileRecycleRecord>(`/recycle-proposals/${proposalId}/restore`, { method: "POST" });
+}
+
+export function confirmRecycleBatch(batchId: string): Promise<FileRecycleBatchRecord> {
+  return request<FileRecycleBatchRecord>(`/recycle-batches/${batchId}/confirm`, { method: "POST" });
+}
+
+export function rejectRecycleBatch(batchId: string): Promise<FileRecycleBatchRecord> {
+  return request<FileRecycleBatchRecord>(`/recycle-batches/${batchId}/reject`, { method: "POST" });
+}
+
+export function restoreRecycleBatch(batchId: string): Promise<FileRecycleBatchRecord> {
+  return request<FileRecycleBatchRecord>(`/recycle-batches/${batchId}/restore`, { method: "POST" });
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {
