@@ -18,6 +18,7 @@ from app.api.memory import router as memory_router
 from app.api.providers import router as providers_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
+from app.api.source_edit_batches import router as source_edit_batches_router
 from app.api.source_edits import router as source_edits_router
 from app.api.tasks import router as tasks_router
 from app.api.workspaces import router as workspace_router
@@ -37,6 +38,7 @@ from app.memory.service import MemoryService
 from app.memory.worker import MemoryWorker
 from app.parsing.service import ParserWorker
 from app.security.secrets import SecretStore
+from app.source_edits.batch_service import SourceFileEditBatchService
 from app.source_edits.service import SourceFileEditService
 from app.web.service import WebResearchService
 
@@ -104,6 +106,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.web_research_service = web_research_service
         source_edit_service = SourceFileEditService(app.state.database, resolved.data_dir)
         app.state.source_edit_service = source_edit_service
+        source_edit_batch_service = SourceFileEditBatchService(
+            app.state.database,
+            source_edit_service,
+        )
+        app.state.source_edit_batch_service = source_edit_batch_service
+        source_edit_batch_service.recover_incomplete_batches()
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
@@ -113,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             analysis_service,
             web_research_service,
             source_edit_service,
+            source_edit_batch_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(
@@ -190,6 +199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(providers_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
+    app.include_router(source_edit_batches_router)
     app.include_router(source_edits_router)
     app.include_router(tasks_router)
     return app
