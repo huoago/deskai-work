@@ -357,7 +357,6 @@ def _artifact_payload(artifact) -> dict[str, Any]:
         "artifact_id": artifact.id,
         "kind": artifact.kind,
         "filename": artifact.filename,
-        "path": artifact.path,
         "mime_type": artifact.mime_type,
         "sha256": artifact.sha256,
         "size": artifact.size,
