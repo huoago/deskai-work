@@ -490,3 +490,51 @@ For an interrupted `restoring` batch, DeskAI completes restoration of any missin
 Automatic recovery acts only on exact expected SHA-256 states. Unexpected content, missing required quarantine copies, symlinks, or ambiguous original/quarantine combinations freeze the batch as `recovery_required`.
 
 Phase 16 still exposes no permanent-delete/purge endpoint, retention timer, scheduled quarantine cleanup, directory deletion, arbitrary unlink, shell execution, unrestricted Python, or browser/GUI control.
+
+
+## Unified recovery-center boundary
+
+Phase 17 adds an operator-facing Recovery Center without creating a new mutation engine.
+
+The new `GET /recovery` endpoint is **read-only**. It aggregates persisted state from:
+
+- Phase 11 single-file source edits;
+- Phase 12 transactional source-edit batches;
+- Phase 13 single-file organization proposals;
+- Phase 14 transactional organization batches;
+- Phase 15 single-file recycle proposals;
+- Phase 16 transactional recycle batches.
+
+Batch members are not emitted as independent entries, which prevents duplicate or partial actions against a transaction that must remain atomic.
+
+The Recovery Center intentionally excludes ordinary `pending` and `rejected` proposals. Tasks remain the approval surface for new mutations. Recovery Center focuses on:
+
+- applied content/path transactions that are eligible for rollback;
+- recycled files/batches that are eligible for restore;
+- completed rollback/restore history;
+- `recovery_required` states that need operator review.
+
+### No alternate write path
+
+Phase 17 exposes no generic `POST /recovery`, no force-recover endpoint, and no database-state override.
+
+Desktop recovery buttons dispatch only to the original Phase 11–16 endpoints:
+
+- source-edit rollback;
+- source-edit batch rollback;
+- file-organization rollback;
+- file-organization batch rollback;
+- recycle restore;
+- recycle-batch restore.
+
+Therefore the original SHA-256 freshness checks, write authorization, backup/quarantine requirements, no-overwrite rules, Office-lock checks, transactional rollback behavior, startup recovery, and audit logging remain authoritative.
+
+### recovery_required behavior
+
+A `recovery_required` entry is visible in Recovery Center, including its persisted error message and associated Task id.
+
+Recovery Center does **not** expose a "force", "ignore hash", "overwrite", or "mark fixed" action.
+
+The operator may open the associated Task and review AuditLog history, but any filesystem repair outside verified DeskAI automation remains an explicit manual action.
+
+Phase 17 does not add permanent deletion, quarantine purge, directory mutation, arbitrary path access, shell execution, unrestricted Python, or browser/GUI automation.
