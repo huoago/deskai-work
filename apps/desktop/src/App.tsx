@@ -1026,7 +1026,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 11 · AI + 记忆 + Web Research + 人工确认源文件编辑</span>
+          <span className="phase-chip">Phase 12 · AI + Web Research + 单文件编辑 + 跨文件事务</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1114,7 +1114,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11 写入边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11/12 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
@@ -1499,7 +1499,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，并为已开启写权限的 TXT/MD/DOCX/XLSX 生成编辑提案；实际覆盖必须由你逐次确认。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，并为 TXT/MD/DOCX/XLSX 生成单文件或 2–10 文件事务提案；所有源文件写入都必须由你确认。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1873,7 +1873,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 11</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 12</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1886,6 +1886,9 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
           <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
           <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件或系统命令</p>\n          <p><b>✓</b> Phase 10 Web Research 仅通过 Provider 托管搜索，保留 Source；Local Only 禁用，并阻断疑似密钥查询</p>\n          <p><b>✓</b> Web Research 不提供任意 URL 抓取、下载、浏览器控制或网页指令执行</p>\n          <p><b>✓</b> Phase 11 Agent 只能生成源文件编辑提案，不能直接覆盖源文件</p>\n          <p><b>✓</b> 源文件编辑需目录 write_allowed + 逐次人工确认 + SHA-256 复核 + 自动备份</p>\n          <p><b>✓</b> 已应用编辑只有在文件未再次变化时才允许自动回滚</p>
+          <p><b>✓</b> Phase 12 支持 2–10 个文件的 All-or-nothing 事务提案与一次确认</p>
+          <p><b>✓</b> 批量提交先全量预检与备份，任一写入失败会恢复已写入成员</p>
+          <p><b>✓</b> Engine 启动会恢复中断的 applying/rolling_back 事务；无法安全判断时进入 recovery_required</p>
         </div>
       </article>
     </section>
