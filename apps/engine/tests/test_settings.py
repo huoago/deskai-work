@@ -9,6 +9,8 @@ def test_settings_have_defaults_and_persist_updates(client):
         "default_model": "gpt-5.6-sol",
         "reasoning_level": "medium",
         "auto_index": True,
+        "memory_auto_learn": True,
+        "memory_min_confidence": 0.78,
     }
 
     updated = client.patch(
@@ -18,6 +20,8 @@ def test_settings_have_defaults_and_persist_updates(client):
             "default_model": "custom-provider-model",
             "reasoning_level": "high",
             "auto_index": False,
+            "memory_auto_learn": False,
+            "memory_min_confidence": 0.91,
         },
     )
     assert updated.status_code == 200
@@ -25,6 +29,8 @@ def test_settings_have_defaults_and_persist_updates(client):
     assert updated.json()["default_model"] == "custom-provider-model"
     assert updated.json()["reasoning_level"] == "high"
     assert updated.json()["auto_index"] is False
+    assert updated.json()["memory_auto_learn"] is False
+    assert updated.json()["memory_min_confidence"] == 0.91
 
     persisted = client.get("/settings").json()
     assert persisted == updated.json()

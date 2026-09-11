@@ -3,22 +3,28 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   addWorkspaceRoot,
   checkEngine,
+  createMemory,
   createWorkspace,
+  deactivateMemory,
   deleteOpenAIApiKey,
   getDesktopSettings,
   getIndexQueueSummary,
   getKnowledgeStatus,
+  getMemoryStatus,
   getOpenAIProviderStatus,
   getParsedPreview,
   getParserStatus,
   getWorkspaceWatcherStatus,
   listConversations,
   listFiles,
+  listMemories,
   listMessages,
   listWorkspaceRoots,
   listWorkspaces,
   processKnowledgeQueue,
+  processMemoryQueue,
   processParserQueue,
+  retryMemoryQueue,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -26,6 +32,7 @@ import {
   streamChat,
   testOpenAIProvider,
   updateDesktopSettings,
+  updateMemory,
   updateWorkspaceRoot,
   type ChatMessage,
   type Conversation,
@@ -34,6 +41,8 @@ import {
   type IndexedFile,
   type IndexQueueSummary,
   type KnowledgeStatus,
+  type MemoryRecord,
+  type MemoryStatus,
   type MessageCitation,
   type OpenAIProviderStatus,
   type ParsedPreview,
@@ -49,15 +58,15 @@ type EngineState =
   | { kind: "online"; connection: EngineConnection }
   | { kind: "offline"; message: string };
 
-type Page = "chat" | "workspace" | "files" | "search" | "settings";
+type Page = "chat" | "workspace" | "files" | "search" | "memory" | "settings";
 
-const nav: Array<{ id: Page | "tasks" | "memory" | "activity"; label: string; enabled: boolean; phase?: string }> = [
+const nav: Array<{ id: Page | "tasks" | "activity"; label: string; enabled: boolean; phase?: string }> = [
   { id: "chat", label: "对话", enabled: true },
   { id: "workspace", label: "工作区", enabled: true },
   { id: "files", label: "文件", enabled: true },
   { id: "search", label: "资料检索", enabled: true },
+  { id: "memory", label: "记忆", enabled: true },
   { id: "tasks", label: "任务", enabled: false, phase: "Phase 7" },
-  { id: "memory", label: "记忆", enabled: false, phase: "Phase 6" },
   { id: "activity", label: "活动", enabled: false, phase: "Phase 7" },
 ];
 
@@ -66,6 +75,8 @@ const defaultSettings: DesktopSettings = {
   default_model: "gpt-5.6-sol",
   reasoning_level: "medium",
   auto_index: true,
+  memory_auto_learn: true,
+  memory_min_confidence: 0.78,
 };
 
 const emptyQueue: IndexQueueSummary = {
@@ -88,6 +99,8 @@ export default function App() {
   const [queue, setQueue] = useState<IndexQueueSummary>(emptyQueue);
   const [parserStatus, setParserStatus] = useState<ParserStatus | null>(null);
   const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
+  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -149,6 +162,8 @@ export default function App() {
       setQueue(emptyQueue);
       setParserStatus(null);
       setKnowledgeStatus(null);
+      setMemories([]);
+      setMemoryStatus(null);
       setSearchResults([]);
       setPreview(null);
       setActiveConversationId("");
@@ -171,7 +186,7 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search"].includes(page)) return;
+    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
         listFiles(activeWorkspaceId),
@@ -179,13 +194,17 @@ export default function App() {
         getIndexQueueSummary(activeWorkspaceId),
         getParserStatus(),
         getKnowledgeStatus(activeWorkspaceId),
+        listMemories(activeWorkspaceId, true, true),
+        getMemoryStatus(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
           setParserStatus(nextParserStatus);
           setKnowledgeStatus(nextKnowledgeStatus);
+          setMemories(nextMemories);
+          setMemoryStatus(nextMemoryStatus);
         })
         .catch(() => undefined);
     }, 3000);
@@ -203,7 +222,7 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
@@ -211,6 +230,8 @@ export default function App() {
       getIndexQueueSummary(workspaceId),
       getParserStatus(),
       getKnowledgeStatus(workspaceId),
+      listMemories(workspaceId, true, true),
+      getMemoryStatus(workspaceId),
     ]);
     setRoots(nextRoots);
     setFiles(nextFiles);
@@ -219,6 +240,8 @@ export default function App() {
     setQueue(nextQueue);
     setParserStatus(nextParserStatus);
     setKnowledgeStatus(nextKnowledgeStatus);
+    setMemories(nextMemories);
+    setMemoryStatus(nextMemoryStatus);
     setActiveConversationId((current) => {
       if (current && nextConversations.some((item) => item.id === current)) return current;
       return nextConversations[0]?.id ?? "";
@@ -417,6 +440,100 @@ export default function App() {
     }
   }
 
+  async function onProcessMemoryQueue() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await processMemoryQueue(50);
+      await refreshWorkspaceData();
+      setNotice(`记忆学习处理完成：本次处理 ${result.processed} 个任务。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "记忆学习处理失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRetryMemoryQueue() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await retryMemoryQueue();
+      await refreshWorkspaceData();
+      setNotice(`已重新入队 ${result.queued} 个失败/阻塞的记忆学习任务。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "记忆任务重试失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCreateMemory(payload: {
+    workspace_id: string | null;
+    type: string;
+    subject: string;
+    predicate: string;
+    value: string;
+    importance: number;
+  }) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await createMemory(payload);
+      await refreshWorkspaceData();
+      setNotice("记忆已保存。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "新增记忆失败");
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onUpdateMemory(memoryId: string, value: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await updateMemory(memoryId, { value, reason: "desktop manual edit" });
+      await refreshWorkspaceData();
+      setNotice("记忆已更新，旧值已进入版本历史。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "更新记忆失败");
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeactivateMemory(memoryId: string) {
+    if (!window.confirm("停用后这条记忆将不再用于后续对话，但历史版本会保留。继续吗？")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await deactivateMemory(memoryId);
+      await refreshWorkspaceData();
+      setNotice("记忆已停用。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "停用记忆失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onReactivateMemory(memoryId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await updateMemory(memoryId, { status: "active", reason: "desktop reactivate" });
+      await refreshWorkspaceData();
+      setNotice("记忆已恢复为活动状态。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "恢复记忆失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -594,6 +711,19 @@ export default function App() {
             onProcess={onProcessKnowledgeQueue}
             disabled={!online || busy}
           />
+        ) : page === "memory" ? (
+          <MemoryPage
+            workspace={activeWorkspace}
+            memories={memories}
+            status={memoryStatus}
+            disabled={!online || busy}
+            onProcess={onProcessMemoryQueue}
+            onRetry={onRetryMemoryQueue}
+            onCreate={onCreateMemory}
+            onUpdate={onUpdateMemory}
+            onDeactivate={onDeactivateMemory}
+            onReactivate={onReactivateMemory}
+          />
         ) : (
           <SettingsPage
             values={desktopSettings}
@@ -667,7 +797,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 5 · AI + 本地资料</span>
+          <span className="phase-chip">Phase 6 · AI + 本地资料 + 长期记忆</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -924,6 +1054,179 @@ function SearchPage({ workspace, query, setQuery, results, loading, knowledge, o
   );
 }
 
+function MemoryPage({ workspace, memories, status, disabled, onProcess, onRetry, onCreate, onUpdate, onDeactivate, onReactivate }: {
+  workspace: Workspace | null;
+  memories: MemoryRecord[];
+  status: MemoryStatus | null;
+  disabled: boolean;
+  onProcess: () => void;
+  onRetry: () => void;
+  onCreate: (payload: {
+    workspace_id: string | null;
+    type: string;
+    subject: string;
+    predicate: string;
+    value: string;
+    importance: number;
+  }) => Promise<void>;
+  onUpdate: (memoryId: string, value: string) => Promise<void>;
+  onDeactivate: (memoryId: string) => void;
+  onReactivate: (memoryId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [scope, setScope] = useState<"global" | "workspace">("workspace");
+  const [type, setType] = useState("decision");
+  const [subject, setSubject] = useState("");
+  const [predicate, setPredicate] = useState("");
+  const [value, setValue] = useState("");
+  const [importance, setImportance] = useState(0.8);
+  const [editingId, setEditingId] = useState("");
+  const [editingValue, setEditingValue] = useState("");
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return memories.filter((memory) => {
+      if (!showInactive && memory.status !== "active") return false;
+      if (!needle) return true;
+      const haystack = [
+        memory.type,
+        memory.subject,
+        memory.predicate,
+        renderMemoryValue(memory.value),
+        memory.workspace_id ? "workspace" : "global",
+      ].join(" ").toLocaleLowerCase();
+      return haystack.includes(needle);
+    });
+  }, [memories, query, showInactive]);
+
+  const activeCount = memories.filter((item) => item.status === "active").length;
+  const globalCount = memories.filter((item) => item.status === "active" && item.workspace_id === null).length;
+  const workspaceCount = memories.filter((item) => item.status === "active" && item.workspace_id !== null).length;
+
+  async function submitMemory() {
+    if (!subject.trim() || !predicate.trim() || !value.trim()) return;
+    await onCreate({
+      workspace_id: scope === "global" ? null : workspace?.id ?? null,
+      type,
+      subject: subject.trim(),
+      predicate: predicate.trim(),
+      value: value.trim(),
+      importance,
+    });
+    setSubject("");
+    setPredicate("");
+    setValue("");
+  }
+
+  async function saveEdit(memory: MemoryRecord) {
+    if (!editingValue.trim()) return;
+    await onUpdate(memory.id, editingValue.trim());
+    setEditingId("");
+    setEditingValue("");
+  }
+
+  return (
+    <section className="memory-page">
+      <div className="knowledge-status-grid">
+        <Metric label="活动记忆" value={String(activeCount)} />
+        <Metric label="全局记忆" value={String(globalCount)} />
+        <Metric label="当前项目" value={String(workspaceCount)} />
+        <Metric label="待学习任务" value={String(status?.queued_jobs ?? 0)} />
+        <Metric label="Memory Worker" value={status?.running ? "运行中" : "未运行"} />
+      </div>
+
+      <div className="memory-layout">
+        <article className="panel memory-list-panel">
+          <div className="panel-head">
+            <div>
+              <h3>长期记忆</h3>
+              <p className="muted small">全局记忆跨 Workspace 使用；项目记忆只在当前 Workspace 生效。当前用户指令始终优先于旧记忆。</p>
+            </div>
+            <div className="button-row">
+              <button className="secondary" onClick={onProcess} disabled={disabled}>立即学习</button>
+              <button className="secondary" onClick={onRetry} disabled={disabled || ((status?.failed_jobs ?? 0) + (status?.blocked_jobs ?? 0) === 0)}>重试失败任务</button>
+            </div>
+          </div>
+
+          <div className="memory-toolbar">
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索主题、规则、数值…" />
+            <label className="compact-check"><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} />显示已停用</label>
+          </div>
+
+          {status?.last_error && <p className="provider-error">最近学习错误：{status.last_error}</p>}
+
+          <div className="memory-list">
+            {visible.map((memory) => (
+              <article className={`memory-card ${memory.status === "inactive" ? "inactive" : ""}`} key={memory.id}>
+                <div className="memory-card-head">
+                  <div className="memory-tags">
+                    <span>{memory.workspace_id ? "当前项目" : "全局"}</span>
+                    <span>{memory.type}</span>
+                    <span>{memory.source_type === "conversation" ? "对话学习" : "手工"}</span>
+                  </div>
+                  <span className={memory.status === "active" ? "memory-state active" : "memory-state"}>{memory.status === "active" ? "活动" : "已停用"}</span>
+                </div>
+                <h4>{memory.subject}</h4>
+                <p className="memory-predicate">{memory.predicate}</p>
+                {editingId === memory.id ? (
+                  <div className="memory-edit">
+                    <textarea value={editingValue} onChange={(event) => setEditingValue(event.target.value)} />
+                    <div className="button-row">
+                      <button className="primary" onClick={() => saveEdit(memory)} disabled={disabled || !editingValue.trim()}>保存修改</button>
+                      <button className="text-button" onClick={() => { setEditingId(""); setEditingValue(""); }}>取消</button>
+                    </div>
+                  </div>
+                ) : (
+                  <pre className="memory-value">{renderMemoryValue(memory.value)}</pre>
+                )}
+                <div className="memory-card-foot">
+                  <span>置信度 {Math.round(memory.confidence * 100)}%</span>
+                  <span>重要度 {Math.round(memory.importance * 100)}%</span>
+                  <span>{formatDate(memory.updated_at)}</span>
+                  <div className="memory-actions">
+                    {memory.status === "active" && (
+                      <>
+                        <button className="text-button" onClick={() => { setEditingId(memory.id); setEditingValue(renderMemoryValue(memory.value)); }} disabled={disabled}>修改</button>
+                        <button className="text-button danger" onClick={() => onDeactivate(memory.id)} disabled={disabled}>停用</button>
+                      </>
+                    )}
+                    {memory.status === "inactive" && <button className="text-button" onClick={() => onReactivate(memory.id)} disabled={disabled}>恢复</button>}
+                  </div>
+                </div>
+              </article>
+            ))}
+            {!visible.length && <p className="muted">当前筛选条件下没有记忆。</p>}
+          </div>
+        </article>
+
+        <aside className="panel memory-create-panel">
+          <div className="panel-head">
+            <div><h3>手工新增记忆</h3><p className="muted small">适合明确的长期规则、决定或项目状态。敏感个人信息和密钥会被后端拒绝。</p></div>
+          </div>
+          <label>作用范围<select value={scope} onChange={(event) => setScope(event.target.value as "global" | "workspace")}><option value="workspace">当前 Workspace</option><option value="global">全局</option></select></label>
+          <label>类型<select value={type} onChange={(event) => setType(event.target.value)}><option value="preference">preference</option><option value="decision">decision</option><option value="constraint">constraint</option><option value="correction">correction</option><option value="project_state">project_state</option><option value="workflow">workflow</option><option value="person_role">person_role</option></select></label>
+          <label>主题<input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="例如：技术报告" /></label>
+          <label>属性<input value={predicate} onChange={(event) => setPredicate(event.target.value)} placeholder="例如：默认语言" /></label>
+          <label>值<textarea value={value} onChange={(event) => setValue(event.target.value)} placeholder="例如：中文" /></label>
+          <label>重要度<input type="range" min="0" max="1" step="0.05" value={importance} onChange={(event) => setImportance(Number(event.target.value))} /><span className="range-value">{Math.round(importance * 100)}%</span></label>
+          <button className="primary full" onClick={submitMemory} disabled={disabled || !subject.trim() || !predicate.trim() || !value.trim()}>保存记忆</button>
+          <p className="memory-policy-note">自动学习只从用户对话中提取长期信息；文件中的工程事实继续由 Knowledge Base 管理，不重复写入 Memory。</p>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function renderMemoryValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, apiKeyDraft, setApiKeyDraft, providerAction, onSaveApiKey, onDeleteApiKey, onTestProvider }: {
   values: DesktopSettings;
   onChange: (values: DesktopSettings) => void;
@@ -946,6 +1249,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
         <label>默认模型<input value={values.default_model} onChange={(e) => onChange({ ...values, default_model: e.target.value })} /></label>
         <label>推理级别<select value={values.reasoning_level} onChange={(e) => onChange({ ...values, reasoning_level: e.target.value as DesktopSettings["reasoning_level"] })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
         <label className="toggle-row"><input type="checkbox" checked={values.auto_index} onChange={(e) => onChange({ ...values, auto_index: e.target.checked })} /><span><strong>自动索引入队</strong><small>Watcher 发现目录变化时自动进入 Index Queue；关闭后仍可手动扫描入队</small></span></label>
+        <label className="toggle-row"><input type="checkbox" checked={values.memory_auto_learn} onChange={(e) => onChange({ ...values, memory_auto_learn: e.target.checked })} /><span><strong>自动学习长期记忆</strong><small>仅从用户对话提取长期偏好、决策、约束、纠正、项目状态和工作流程</small></span></label>
+        <label>记忆最低置信度<input type="number" min="0.5" max="1" step="0.01" value={values.memory_min_confidence} onChange={(e) => onChange({ ...values, memory_min_confidence: Number(e.target.value) })} /></label>
         <button className="primary save-settings" disabled={!dirty || busy || !values.default_model.trim()} onClick={onSave}>{busy ? "保存中…" : dirty ? "保存设置" : "已保存"}</button>
       </article>
 
@@ -991,7 +1296,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 5</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 6</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -999,6 +1304,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Hybrid 模式只发送检索命中的必要片段</p>
           <p><b>✓</b> Responses API 请求显式使用 store=false</p>
           <p><b>✓</b> Local Only 模式不会调用云模型</p>
+          <p><b>✓</b> 自动记忆不保存密钥、身份/金融凭据及敏感个人信息</p>
+          <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
         </div>
       </article>
     </section>
@@ -1014,6 +1321,7 @@ function pageTitle(page: Page) {
   if (page === "workspace") return "工作区与资料授权";
   if (page === "files") return "文件解析与预览";
   if (page === "search") return "资料检索与引用";
+  if (page === "memory") return "长期记忆与自主学习";
   return "设置";
 }
 

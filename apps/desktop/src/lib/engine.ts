@@ -162,11 +162,56 @@ export type OpenAIProviderStatus = {
   model: string;
 };
 
+export type MemoryRecord = {
+  id: string;
+  workspace_id: string | null;
+  type: string;
+  subject: string;
+  predicate: string;
+  value: unknown;
+  confidence: number;
+  importance: number;
+  source_type: string | null;
+  source_message_id: string | null;
+  source_chunk_id: string | null;
+  status: "active" | "inactive";
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MemoryVersion = {
+  id: string;
+  memory_id: string;
+  value: unknown;
+  reason: string | null;
+  created_at: string;
+};
+
+export type MemoryStatus = {
+  running: boolean;
+  processed: number;
+  failed: number;
+  blocked: number;
+  last_job_id: string | null;
+  last_completed_at: string | null;
+  last_error: string | null;
+  workspace_id: string | null;
+  active_memories: number;
+  queued_jobs: number;
+  processing_jobs: number;
+  failed_jobs: number;
+  blocked_jobs: number;
+};
+
 export type DesktopSettings = {
   privacy_mode: "local" | "hybrid" | "cloud";
   default_model: string;
   reasoning_level: "low" | "medium" | "high";
   auto_index: boolean;
+  memory_auto_learn: boolean;
+  memory_min_confidence: number;
 };
 
 type EngineBootstrap = {
@@ -312,6 +357,72 @@ export function searchKnowledge(
 }
 
 
+export function getMemoryStatus(workspaceId?: string): Promise<MemoryStatus> {
+  const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return request<MemoryStatus>(`/memory/status${suffix}`);
+}
+
+export function processMemoryQueue(limit = 20): Promise<{ processed: number; status: MemoryStatus }> {
+  return request(`/memory/process?limit=${encodeURIComponent(String(limit))}`, { method: "POST" });
+}
+
+export function retryMemoryQueue(): Promise<{ queued: number }> {
+  return request("/memory/retry", { method: "POST" });
+}
+
+export function listMemories(
+  workspaceId?: string,
+  includeGlobal = true,
+  includeInactive = false,
+): Promise<MemoryRecord[]> {
+  const params = new URLSearchParams();
+  if (workspaceId) params.set("workspace_id", workspaceId);
+  params.set("include_global", String(includeGlobal));
+  params.set("include_inactive", String(includeInactive));
+  return request<MemoryRecord[]>(`/memories?${params.toString()}`);
+}
+
+export function createMemory(payload: {
+  workspace_id?: string | null;
+  type: string;
+  subject: string;
+  predicate: string;
+  value: unknown;
+  importance?: number;
+}): Promise<MemoryRecord> {
+  return request<MemoryRecord>("/memories", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateMemory(
+  memoryId: string,
+  changes: Partial<{
+    type: string;
+    subject: string;
+    predicate: string;
+    value: unknown;
+    importance: number;
+    status: "active" | "inactive";
+    reason: string;
+  }>,
+): Promise<MemoryRecord> {
+  return request<MemoryRecord>(`/memories/${memoryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(changes),
+  });
+}
+
+export function deactivateMemory(memoryId: string): Promise<MemoryRecord> {
+  return request<MemoryRecord>(`/memories/${memoryId}`, { method: "DELETE" });
+}
+
+export function listMemoryVersions(memoryId: string): Promise<MemoryVersion[]> {
+  return request<MemoryVersion[]>(`/memories/${memoryId}/versions`);
+}
+
+
 export function listConversations(workspaceId?: string): Promise<Conversation[]> {
   const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
   return request<Conversation[]>(`/conversations${suffix}`);
@@ -366,6 +477,7 @@ export type ChatStreamCallbacks = {
     model?: string;
     privacy_mode?: string;
     source_count?: number;
+    memory_count?: number;
   }) => void;
   onSources?: (sources: MessageCitation[]) => void;
   onDelta?: (text: string) => void;
@@ -376,6 +488,7 @@ export type ChatStreamCallbacks = {
     model?: string;
     input_tokens?: number;
     output_tokens?: number;
+    memory_job_id?: string | null;
   }) => void;
 };
 
@@ -425,6 +538,7 @@ export async function streamChat(
         model?: string;
         privacy_mode?: string;
         source_count?: number;
+        memory_count?: number;
       });
     }
     if (event === "sources") {
@@ -441,6 +555,7 @@ export async function streamChat(
           model?: string;
           input_tokens?: number;
           output_tokens?: number;
+          memory_job_id?: string | null;
         },
       );
     }

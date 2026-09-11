@@ -11,6 +11,7 @@ from app.api.errors import AppError, app_error_handler
 from app.api.files import router as files_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
+from app.api.memory import router as memory_router
 from app.api.providers import router as providers_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
@@ -22,6 +23,8 @@ from app.database.session import Database
 from app.indexing.watcher import WorkspaceWatcher
 from app.knowledge.search import HybridSearch
 from app.knowledge.service import KnowledgeIndexer
+from app.memory.service import MemoryService
+from app.memory.worker import MemoryWorker
 from app.parsing.service import ParserWorker
 from app.security.secrets import SecretStore
 
@@ -67,15 +70,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.database,
             knowledge_indexer.vector_store,
         )
+        memory_service = MemoryService(app.state.database)
+        app.state.memory_service = memory_service
+        memory_worker = MemoryWorker(
+            app.state.database,
+            memory_service,
+            app.state.secret_store,
+            app.state.openai_provider,
+            interval_seconds=resolved.memory_worker_interval_seconds,
+        )
+        app.state.memory_worker = memory_worker
         if resolved.watcher_enabled:
             watcher.start()
         if resolved.parser_worker_enabled:
             parser_worker.start()
         if resolved.knowledge_worker_enabled:
             knowledge_indexer.start()
+        if resolved.memory_worker_enabled:
+            memory_worker.start()
         try:
             yield
         finally:
+            memory_worker.stop()
             knowledge_indexer.stop()
             parser_worker.stop()
             watcher.stop()
@@ -83,7 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="DeskAI Engine",
-        version="0.5.0",
+        version="0.6.0",
         docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -118,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(roots_router)
     app.include_router(files_router)
     app.include_router(knowledge_router)
+    app.include_router(memory_router)
     app.include_router(providers_router)
     app.include_router(chat_router)
     app.include_router(settings_router)

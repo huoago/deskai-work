@@ -15,6 +15,7 @@ from app.ai.context import SYSTEM_INSTRUCTIONS, build_input_items, build_retriev
 from app.ai.provider import ProviderError
 from app.api.settings import DEFAULTS
 from app.database.models import Citation, Conversation, File, Message, Setting, Workspace, utcnow
+from app.memory.context import build_memory_context
 
 router = APIRouter(tags=["chat"])
 CITATION_RE = re.compile(r"\[(\d{1,3})\]")
@@ -205,6 +206,10 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         privacy_mode = str(_chat_setting(session, "privacy_mode"))
         model = str(_chat_setting(session, "default_model"))
         reasoning_effort = str(_chat_setting(session, "reasoning_level"))
+        memory_auto_learn = bool(_chat_setting(session, "memory_auto_learn"))
+        effective_workspace_id = payload.workspace_id or (
+            conversation.workspace_id if conversation is not None else None
+        )
 
     if privacy_mode == "local":
         raise HTTPException(
@@ -220,15 +225,25 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
         )
 
     hits: list[dict[str, Any]] = []
-    if payload.workspace_id:
-        hits = request.app.state.hybrid_search.search(payload.workspace_id, message_text, limit=8)
+    if effective_workspace_id:
+        hits = request.app.state.hybrid_search.search(effective_workspace_id, message_text, limit=8)
     retrieved_context = build_retrieved_context(hits)
-    input_items = build_input_items(history, message_text, retrieved_context)
+    memory_hits = request.app.state.memory_service.retrieve(
+        workspace_id=effective_workspace_id,
+        query=message_text,
+        limit=8,
+    )
+    memory_context = build_memory_context(memory_hits)
+    input_items = build_input_items(
+        history,
+        message_text,
+        retrieved_context + memory_context,
+    )
 
     with request.app.state.database.session() as session:
         if conversation is None:
             title = message_text.replace("\n", " ")[:60]
-            conversation = Conversation(workspace_id=payload.workspace_id, title=title)
+            conversation = Conversation(workspace_id=effective_workspace_id, title=title)
             session.add(conversation)
             session.flush()
 
@@ -264,6 +279,7 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
                 "model": model,
                 "privacy_mode": privacy_mode,
                 "source_count": len(source_meta),
+                "memory_count": len(memory_hits),
             },
         )
         if source_meta:
@@ -368,11 +384,22 @@ def stream_chat(payload: ChatRequest, request: Request) -> StreamingResponse:
                 )
             assistant_message_id = assistant_message.id
 
+        memory_job_id = None
+        if memory_auto_learn:
+            memory_job = request.app.state.memory_service.enqueue_learning(
+                workspace_id=effective_workspace_id,
+                conversation_id=conversation_id,
+                source_message_id=user_message_id,
+            )
+            memory_job_id = memory_job.id
+            request.app.state.memory_worker.wake()
+
         yield _sse(
             "done",
             {
                 "assistant_message_id": assistant_message_id,
                 "citations": stored_citations,
+                "memory_job_id": memory_job_id,
                 **completion,
             },
         )

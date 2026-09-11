@@ -25,6 +25,8 @@ class Settings:
     parser_worker_interval_seconds: float = 0.75
     knowledge_worker_enabled: bool = True
     knowledge_worker_interval_seconds: float = 1.0
+    memory_worker_enabled: bool = True
+    memory_worker_interval_seconds: float = 1.25
 
     @classmethod
     def load(cls, *, session_token: str | None = None) -> "Settings":
@@ -42,6 +44,11 @@ class Settings:
             not in {"0", "false", "False"},
             knowledge_worker_interval_seconds=max(
                 float(os.environ.get("DESKAI_KNOWLEDGE_WORKER_INTERVAL", "1.0")), 0.25
+            ),
+            memory_worker_enabled=os.environ.get("DESKAI_MEMORY_WORKER_ENABLED", "1")
+            not in {"0", "false", "False"},
+            memory_worker_interval_seconds=max(
+                float(os.environ.get("DESKAI_MEMORY_WORKER_INTERVAL", "1.25")), 0.5
             ),
         )
 

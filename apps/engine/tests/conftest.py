@@ -17,6 +17,7 @@ def client(tmp_path: Path):
             watcher_enabled=False,
             parser_worker_enabled=False,
             knowledge_worker_enabled=False,
+            memory_worker_enabled=False,
         )
     )
     with TestClient(app) as test_client:
