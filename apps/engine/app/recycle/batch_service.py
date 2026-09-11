@@ -129,6 +129,10 @@ class FileRecycleBatchService:
             for snapshot in snapshots:
                 self._remove_source(snapshot)
                 removed.append(snapshot)
+                self.recycle_service._verify_quarantine(
+                    snapshot["quarantine"],
+                    snapshot["original_sha256"],
+                )
         except Exception as exc:
             if removed:
                 failures = self._restore_removed_sources(removed)
@@ -623,10 +627,6 @@ class FileRecycleBatchService:
         source.unlink()
         if source.exists() or source.is_symlink():
             raise ValueError(f"Source path still exists after recycle: {source.name}")
-        self.recycle_service._verify_quarantine(
-            snapshot["quarantine"],
-            snapshot["original_sha256"],
-        )
 
     def _restore_removed_sources(
         self,
