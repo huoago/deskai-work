@@ -122,7 +122,7 @@ class FileRecycleBatchService:
                 self.recycle_service._ensure_source_available(snapshot["source"])
                 if sha256_file(snapshot["source"]) != snapshot["original_sha256"]:
                     raise ValueError(
-                        f"{snapshot['filename']} changed while quarantine copies "
+                        f"{snapshot['source'].name} changed while quarantine copies "
                         "were being prepared"
                     )
 
