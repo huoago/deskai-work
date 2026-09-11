@@ -345,7 +345,7 @@ class SourceFileEditService:
             file = session.get(File, file_id)
             if file is None or file.workspace_id != workspace_id:
                 raise ValueError("File is not part of the active Workspace")
-            if file.status in {"deleted", "revoked", "unsupported"}:
+            if file.status in {"deleted", "recycled", "revoked", "unsupported"}:
                 raise ValueError("File is not currently editable")
             source = Path(file.path)
             if source.is_symlink():
