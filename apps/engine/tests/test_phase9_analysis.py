@@ -329,7 +329,17 @@ def test_phase9_agent_can_chain_table_analysis_and_receive_local_results(client)
         "calculate_expression",
     ]
 
-    second_round = json.dumps(provider.calls[1]["input_items"], ensure_ascii=False)
-    third_round = json.dumps(provider.calls[2]["input_items"], ensure_ascii=False)
-    assert '"sum":4447.0' in second_round
-    assert '"result":1960.0' in third_round
+    second_items = provider.calls[1]["input_items"]
+    third_items = provider.calls[2]["input_items"]
+    summary_output = next(
+        item for item in second_items
+        if item.get("type") == "function_call_output" and item.get("call_id") == "summary_1"
+    )
+    calc_output = next(
+        item for item in third_items
+        if item.get("type") == "function_call_output" and item.get("call_id") == "calc_1"
+    )
+    summary_payload = json.loads(summary_output["output"])
+    calc_payload = json.loads(calc_output["output"])
+    assert summary_payload["result"]["columns"][0]["sum"] == 4447.0
+    assert calc_payload["result"]["result"] == 1960.0
