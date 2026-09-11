@@ -19,6 +19,7 @@ from app.api.knowledge import router as knowledge_router
 from app.api.memory import router as memory_router
 from app.api.providers import router as providers_router
 from app.api.recycle import router as recycle_router
+from app.api.recycle_batches import router as recycle_batches_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
 from app.api.source_edit_batches import router as source_edit_batches_router
@@ -36,6 +37,7 @@ from app.database.migrate import run_migrations
 from app.database.session import Database
 from app.file_ops.batch_service import FileOrganizationBatchService
 from app.file_ops.service import FileOrganizationService
+from app.recycle.batch_service import FileRecycleBatchService
 from app.recycle.service import FileRecycleService
 from app.indexing.watcher import WorkspaceWatcher
 from app.knowledge.search import HybridSearch
@@ -136,6 +138,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             source_edit_service,
         )
         app.state.file_recycle_service = file_recycle_service
+        file_recycle_batch_service = FileRecycleBatchService(
+            app.state.database,
+            file_recycle_service,
+        )
+        app.state.file_recycle_batch_service = file_recycle_batch_service
+        file_recycle_batch_service.recover_incomplete_batches()
         file_recycle_service.recover_incomplete_operations()
         tool_registry = ToolRegistry(
             app.state.database,
@@ -150,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             file_organization_service,
             file_organization_batch_service,
             file_recycle_service,
+            file_recycle_batch_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(
@@ -228,6 +237,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(memory_router)
     app.include_router(providers_router)
     app.include_router(recycle_router)
+    app.include_router(recycle_batches_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
     app.include_router(source_edit_batches_router)
