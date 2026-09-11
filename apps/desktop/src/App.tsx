@@ -4,27 +4,34 @@ import {
   addWorkspaceRoot,
   checkEngine,
   createMemory,
+  createTask,
   createWorkspace,
   deactivateMemory,
   deleteOpenAIApiKey,
   getDesktopSettings,
   getIndexQueueSummary,
+  getAgentStatus,
   getKnowledgeStatus,
   getMemoryStatus,
   getOpenAIProviderStatus,
   getParsedPreview,
   getParserStatus,
+  getTask,
   getWorkspaceWatcherStatus,
+  listActivity,
   listConversations,
   listFiles,
   listMemories,
   listMessages,
+  listTasks,
   listWorkspaceRoots,
   listWorkspaces,
+  processAgentQueue,
   processKnowledgeQueue,
   processMemoryQueue,
   processParserQueue,
   retryMemoryQueue,
+  retryTask,
   revokeWorkspaceRoot,
   saveOpenAIApiKey,
   scanWorkspace,
@@ -34,6 +41,8 @@ import {
   updateDesktopSettings,
   updateMemory,
   updateWorkspaceRoot,
+  type ActivityRecord,
+  type AgentStatus,
   type ChatMessage,
   type Conversation,
   type DesktopSettings,
@@ -48,6 +57,8 @@ import {
   type ParsedPreview,
   type ParserStatus,
   type SearchHit,
+  type TaskDetail,
+  type TaskRecord,
   type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
@@ -58,16 +69,16 @@ type EngineState =
   | { kind: "online"; connection: EngineConnection }
   | { kind: "offline"; message: string };
 
-type Page = "chat" | "workspace" | "files" | "search" | "memory" | "settings";
+type Page = "chat" | "workspace" | "files" | "search" | "memory" | "tasks" | "activity" | "settings";
 
-const nav: Array<{ id: Page | "tasks" | "activity"; label: string; enabled: boolean; phase?: string }> = [
+const nav: Array<{ id: Page; label: string; enabled: boolean; phase?: string }> = [
   { id: "chat", label: "对话", enabled: true },
   { id: "workspace", label: "工作区", enabled: true },
   { id: "files", label: "文件", enabled: true },
   { id: "search", label: "资料检索", enabled: true },
   { id: "memory", label: "记忆", enabled: true },
-  { id: "tasks", label: "任务", enabled: false, phase: "Phase 7" },
-  { id: "activity", label: "活动", enabled: false, phase: "Phase 7" },
+  { id: "tasks", label: "任务", enabled: true },
+  { id: "activity", label: "活动", enabled: true },
 ];
 
 const defaultSettings: DesktopSettings = {
@@ -101,6 +112,11 @@ export default function App() {
   const [knowledgeStatus, setKnowledgeStatus] = useState<KnowledgeStatus | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
+  const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [activity, setActivity] = useState<ActivityRecord[]>([]);
+  const [taskRequest, setTaskRequest] = useState("");
+  const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -164,6 +180,10 @@ export default function App() {
       setKnowledgeStatus(null);
       setMemories([]);
       setMemoryStatus(null);
+      setTasks([]);
+      setAgentStatus(null);
+      setActivity([]);
+      setTaskDetail(null);
       setSearchResults([]);
       setPreview(null);
       setActiveConversationId("");
@@ -186,7 +206,7 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory"].includes(page)) return;
+    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory", "tasks", "activity"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
         listFiles(activeWorkspaceId),
@@ -196,8 +216,11 @@ export default function App() {
         getKnowledgeStatus(activeWorkspaceId),
         listMemories(activeWorkspaceId, true, true),
         getMemoryStatus(activeWorkspaceId),
+        listTasks(activeWorkspaceId),
+        getAgentStatus(activeWorkspaceId),
+        listActivity(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
@@ -205,6 +228,9 @@ export default function App() {
           setKnowledgeStatus(nextKnowledgeStatus);
           setMemories(nextMemories);
           setMemoryStatus(nextMemoryStatus);
+          setTasks(nextTasks);
+          setAgentStatus(nextAgentStatus);
+          setActivity(nextActivity);
         })
         .catch(() => undefined);
     }, 3000);
@@ -222,7 +248,7 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
@@ -232,6 +258,9 @@ export default function App() {
       getKnowledgeStatus(workspaceId),
       listMemories(workspaceId, true, true),
       getMemoryStatus(workspaceId),
+      listTasks(workspaceId),
+      getAgentStatus(workspaceId),
+      listActivity(workspaceId),
     ]);
     setRoots(nextRoots);
     setFiles(nextFiles);
@@ -242,6 +271,9 @@ export default function App() {
     setKnowledgeStatus(nextKnowledgeStatus);
     setMemories(nextMemories);
     setMemoryStatus(nextMemoryStatus);
+    setTasks(nextTasks);
+    setAgentStatus(nextAgentStatus);
+    setActivity(nextActivity);
     setActiveConversationId((current) => {
       if (current && nextConversations.some((item) => item.id === current)) return current;
       return nextConversations[0]?.id ?? "";
@@ -534,6 +566,61 @@ export default function App() {
     }
   }
 
+  async function onCreateTask() {
+    if (!activeWorkspaceId || !taskRequest.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const task = await createTask(activeWorkspaceId, taskRequest.trim());
+      setTaskRequest("");
+      setTasks((current) => [task, ...current]);
+      setTaskDetail(await getTask(task.id));
+      setNotice("Agent 任务已进入持久化队列。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "创建 Agent 任务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSelectTask(taskId: string) {
+    try {
+      setTaskDetail(await getTask(taskId));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "加载任务详情失败");
+    }
+  }
+
+  async function onRetryTask(taskId: string) {
+    setBusy(true);
+    setNotice("");
+    try {
+      await retryTask(taskId);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(taskId));
+      setNotice("任务已重新进入 Agent 队列。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重试任务失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onProcessAgentQueue() {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await processAgentQueue(10);
+      await refreshWorkspaceData();
+      if (taskDetail) setTaskDetail(await getTask(taskDetail.id));
+      setNotice(`Agent 队列处理完成：本次处理 ${result.processed} 个任务。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Agent 队列处理失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -724,6 +811,22 @@ export default function App() {
             onDeactivate={onDeactivateMemory}
             onReactivate={onReactivateMemory}
           />
+        ) : page === "tasks" ? (
+          <TasksPage
+            workspace={activeWorkspace}
+            tasks={tasks}
+            status={agentStatus}
+            detail={taskDetail}
+            request={taskRequest}
+            setRequest={setTaskRequest}
+            disabled={!online || busy}
+            onCreate={onCreateTask}
+            onSelect={onSelectTask}
+            onRetry={onRetryTask}
+            onProcess={onProcessAgentQueue}
+          />
+        ) : page === "activity" ? (
+          <ActivityPage activity={activity} />
         ) : (
           <SettingsPage
             values={desktopSettings}
@@ -797,7 +900,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 6 · AI + 本地资料 + 长期记忆</span>
+          <span className="phase-chip">Phase 7 · AI + 记忆 + 只读 Agent</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1296,7 +1399,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 6</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 7</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1306,6 +1409,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Local Only 模式不会调用云模型</p>
           <p><b>✓</b> 自动记忆不保存密钥、身份/金融凭据及敏感个人信息</p>
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
+          <p><b>✓</b> Phase 7 Agent 仅开放四个只读工具，全部写入 ToolCall/AuditLog</p>
         </div>
       </article>
     </section>
@@ -1322,6 +1426,8 @@ function pageTitle(page: Page) {
   if (page === "files") return "文件解析与预览";
   if (page === "search") return "资料检索与引用";
   if (page === "memory") return "长期记忆与自主学习";
+  if (page === "tasks") return "Agent 任务";
+  if (page === "activity") return "Agent 活动与审计";
   return "设置";
 }
 
