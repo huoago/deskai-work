@@ -60,8 +60,15 @@ def _updated_at(item: dict[str, Any]) -> str:
     return str(item.get("created_at") or "")
 
 
+def _is_recovery_required(item: dict[str, Any]) -> bool:
+    return bool(
+        item.get("recovery_required")
+        or item.get("status") == "recovery_required"
+    )
+
+
 def _action(kind: str, item: dict[str, Any]) -> str | None:
-    if item.get("recovery_required"):
+    if _is_recovery_required(item):
         return None
     if kind in {
         "source_edit",
@@ -171,7 +178,7 @@ def _diagnostic_code(message: str) -> tuple[str, str]:
 
 
 def _diagnostic(kind: str, item: dict[str, Any]) -> dict[str, Any] | None:
-    if not item.get("recovery_required"):
+    if not _is_recovery_required(item):
         return None
 
     message = str(item.get("error_message") or "").strip()
@@ -260,7 +267,7 @@ def _entry(
         "filenames": filenames,
         "paths": _paths(kind, item),
         "action": _action(kind, item),
-        "recovery_required": bool(item.get("recovery_required")),
+        "recovery_required": _is_recovery_required(item),
         "transactional": bool(item.get("transactional")),
         "diagnostic": _diagnostic(kind, item),
     }
