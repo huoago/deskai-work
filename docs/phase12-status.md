@@ -1,6 +1,6 @@
 # Phase 12 — Transactional multi-file source editing
 
-Status: implemented on the Phase 12 branch and pending full CI verification.
+Status: complete, verified by full CI, and merged to `main`.
 
 ## Objective
 
@@ -98,14 +98,27 @@ Phase 12 tests cover:
 - Agent can only create a pending transactional batch;
 - duplicate file ids are rejected.
 
-Required CI gates:
+### Merge verification
 
-- Ruff;
-- full Engine Pytest suite;
-- TypeScript typecheck;
-- Vite production build;
-- Windows PyInstaller sidecar;
-- packaged Engine 0.12.0 smoke;
-- packaged `/file-edit-batches` API smoke;
-- Tauri NSIS/MSI;
-- Windows Artifact upload.
+Feature PR #16 passed the complete CI pipeline on Run #63 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **71 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.12.0** health smoke — passed;
+- packaged `/file-edit-batches` API smoke — passed;
+- Tauri Windows NSIS/MSI build — passed;
+- Windows Artifact upload — passed.
+
+Feature PR #16 was squash merged to `main` as commit:
+
+`3f64282b39329826fb950a87f7dc516e2cdfe2d4`
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10275455118`;
+- size: `394176321` bytes;
+- SHA-256: `1b38a732be6170143b260ef33f84eb49466bb2bcd3b2bc709da3dfdc0c103846`.
