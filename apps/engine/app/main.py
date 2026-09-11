@@ -100,6 +100,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.openai_provider,
         )
         app.state.web_research_service = web_research_service
+        source_edit_service = SourceFileEditService(app.state.database, resolved.data_dir)
+        app.state.source_edit_service = source_edit_service
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
@@ -108,6 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             artifact_service,
             analysis_service,
             web_research_service,
+            source_edit_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(
@@ -185,5 +188,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(providers_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
+    app.include_router(source_edits_router)
     app.include_router(tasks_router)
     return app
