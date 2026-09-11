@@ -1,0 +1,61 @@
+.source-edit-section {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.source-edit-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.source-edit-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.source-edit-head,
+.source-edit-hash {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-edit-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.source-edit-head span,
+.source-edit-hash small {
+  color: var(--muted);
+}
+
+.edit-diff-preview {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 900px) {
+  .source-edit-head,
+  .source-edit-hash {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
