@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 8 are complete. Phase 9 controlled local calculation and CSV/XLSX analysis is implemented and is gated by CI before merge.**
+**Phase 0 through Phase 9 are complete. Phase 10 controlled web research is implemented and is gated by CI before merge.**
 
 Implemented foundations:
 
@@ -51,9 +51,11 @@ Implemented foundations:
 - bounded numeric expression evaluator with AST allow-list
 - deterministic CSV/XLSX preview, summary statistics and grouped aggregation
 - Workspace-scoped parsed-cache analysis without arbitrary Python execution
+- provider-backed read-only public web research with preserved source URLs
+- secret-like web query blocking and Local Only enforcement
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, and perform deterministic local calculations and CSV/XLSX analysis. It still does **not** claim neural semantic embeddings, local LLM execution, source-file overwrite/edit, arbitrary Python/shell execution, or GUI/browser control yet.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, and conduct source-preserving public web research through the configured AI provider. It still does **not** claim neural semantic embeddings, local LLM execution, source-file overwrite/edit, arbitrary Python/shell execution, arbitrary URL fetching/downloading, or GUI/browser control yet.
 
 ## V1 phase boundaries
 
@@ -66,10 +68,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 6 — Durable memory:** complete with persistent learning jobs, Structured Output extraction, sensitivity gates, correction/version history, retrieval injection, and Memory UI.
 - **Phase 7 — Agent execution:** complete with persistent Tasks, restart recovery, Responses function calling, a read-only Tool Registry, Permission Gate, ToolCall/AuditLog persistence, and Tasks/Activity UI.
 - **Phase 8 — Safe artifacts:** complete with a generated-artifact registry, sandboxed DOCX/XLSX creation, path traversal protection, no-overwrite semantics, spreadsheet formula-injection neutralization, and artifact UI.
-- **Phase 9 — Controlled analysis:** implemented with a bounded AST numeric evaluator plus Workspace-scoped CSV/XLSX inspect, summary, and grouped aggregation tools; gated by CI before merge.
-- Later phases add web research, stronger OS-isolated computation, and separately gated source-file write capabilities.
+- **Phase 9 — Controlled analysis:** complete with a bounded AST numeric evaluator plus Workspace-scoped CSV/XLSX inspect, summary, and grouped aggregation tools.
+- **Phase 10 — Controlled web research:** implemented with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating; gated by CI before merge.
+- Later phases add stronger OS-isolated computation and separately gated source-file write capabilities.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, and `docs/phase9-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, and `docs/phase10-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -142,6 +145,8 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Formula-like spreadsheet strings are neutralized before writing.
 - Phase 9 calculations use an AST allow-list and never expose general Python exec/import/file/network/process access.
 - CSV/XLSX analysis accepts only Workspace File ids and reads parsed cache rather than arbitrary paths.
+- Phase 10 web research uses the configured AI provider's hosted web-search capability, preserves source URLs, rejects credential-like queries, and remains unavailable in Local Only mode.
+- Web research cannot fetch arbitrary URLs, download files, control a browser, execute webpage instructions, or access local files by itself.
 - Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
 - Unknown or destructive tool names are denied by default.
 - Source-file overwrite/edit/delete actions are not part of the current phase.

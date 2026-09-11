@@ -900,7 +900,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 9 · AI + 记忆 + 安全产物 + 数据分析</span>
+          <span className="phase-chip">Phase 10 · AI + 记忆 + 安全产物 + 数据分析 + Web Research</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1362,7 +1362,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <div className="panel-head">
           <div>
             <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Phase 8 可读取授权资料，并可在 DeskAI 私有生成目录创建新的 Word/Excel 产物；不会覆盖原始资料。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析 CSV/XLSX、生成新的 Word/Excel 产物，并在 Hybrid/Cloud 模式下进行带来源的公开 Web Research；不会覆盖原始资料。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1596,7 +1596,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 9</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 10</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -1608,7 +1608,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> 记忆修改保留版本历史，可随时停用</p>
           <p><b>✓</b> Agent 读取能力仍受 Workspace 隔离，全部工具写入 ToolCall/AuditLog</p>
           <p><b>✓</b> Phase 8 仅新增 DOCX/XLSX 到 DeskAI 私有 generated 目录，不覆盖源文件</p>
-          <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件、网络或系统命令</p>
+          <p><b>✓</b> Phase 9 表格分析只读取已解析 CSV/XLSX；数学计算不支持 import、文件或系统命令</p>\n          <p><b>✓</b> Phase 10 Web Research 仅通过 Provider 托管搜索，保留 Source；Local Only 禁用，并阻断疑似密钥查询</p>\n          <p><b>✓</b> Web Research 不提供任意 URL 抓取、下载、浏览器控制或网页指令执行</p>
         </div>
       </article>
     </section>

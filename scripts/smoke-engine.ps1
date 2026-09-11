@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.9.0") {
+  if ([string]$health.version -ne "0.10.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.9.0, got $($health.version)."
+    throw "Expected packaged engine version 0.10.0, got $($health.version)."
   }
 
   try {

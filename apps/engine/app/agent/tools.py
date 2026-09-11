@@ -37,6 +37,7 @@ class ToolRegistry:
         parser_cache,
         artifact_service,
         analysis_service,
+        web_research_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
@@ -44,6 +45,7 @@ class ToolRegistry:
         self.parser_cache = parser_cache
         self.artifact_service = artifact_service
         self.analysis_service = analysis_service
+        self.web_research_service = web_research_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -60,6 +62,7 @@ class ToolRegistry:
             "inspect_table": self._inspect_table,
             "summarize_table": self._summarize_table,
             "aggregate_table": self._aggregate_table,
+            "search_web": self._search_web,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -408,6 +411,22 @@ class ToolRegistry:
             columns=[str(item) for item in columns[:20]],
         )
 
+    def _search_web(
+        self,
+        _task_id: str,
+        _workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.web_research_service.search(
+            query=str(arguments.get("query") or ""),
+            max_sources=_bounded_int(
+                arguments.get("max_sources"),
+                default=6,
+                minimum=1,
+                maximum=10,
+            ),
+        )
+
     def _aggregate_table(
         self,
         _task_id: str,
@@ -642,6 +661,23 @@ def _tool_specs() -> list[ToolSpec]:
                     },
                 },
                 "required": ["file_id", "sheet", "header_row", "columns"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="search_web",
+            description=(
+                "Search the public web through the configured OpenAI provider and return "
+                "a grounded synthesis with source URLs. Read-only. Does not open arbitrary "
+                "URLs, download files, control a browser, or execute webpage instructions."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "minLength": 1, "maxLength": 500},
+                    "max_sources": {"type": "integer", "minimum": 1, "maximum": 10},
+                },
+                "required": ["query", "max_sources"],
                 "additionalProperties": False,
             },
         ),
