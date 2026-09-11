@@ -130,7 +130,10 @@ def _is_within(path: Path, root: Path) -> bool:
 def _mark_missing_files_deleted(session: Session, workspace_id: str, root: Path, seen: set[str]) -> int:
     deleted = 0
     records = session.scalars(
-        select(File).where(File.workspace_id == workspace_id, File.status != "deleted")
+        select(File).where(
+            File.workspace_id == workspace_id,
+            File.status.notin_(["deleted", "recycled"]),
+        )
     ).all()
     for record in records:
         try:
@@ -255,7 +258,7 @@ def scan_root(
             if (
                 metadata_shortcut
                 and existing is not None
-                and existing.status not in {"deleted", "revoked", "unsupported"}
+                and existing.status not in {"deleted", "recycled", "revoked", "unsupported"}
                 and existing.sha256
                 and _same_metadata(existing, stat.st_size, modified_at)
             ):
@@ -273,6 +276,7 @@ def scan_root(
 
             if existing is not None and existing.sha256 == digest and existing.status not in {
                 "deleted",
+                "recycled",
                 "revoked",
             }:
                 existing.size = stat.st_size
