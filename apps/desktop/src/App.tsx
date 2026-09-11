@@ -25,6 +25,7 @@ import {
   getTask,
   getWorkspaceWatcherStatus,
   listActivity,
+  listRecovery,
   listConversations,
   listFiles,
   listMemories,
@@ -74,6 +75,7 @@ import {
   type OpenAIProviderStatus,
   type ParsedPreview,
   type ParserStatus,
+  type RecoveryEntry,
   type SearchHit,
   type TaskDetail,
   type TaskRecord,
@@ -87,7 +89,7 @@ type EngineState =
   | { kind: "online"; connection: EngineConnection }
   | { kind: "offline"; message: string };
 
-type Page = "chat" | "workspace" | "files" | "search" | "memory" | "tasks" | "activity" | "settings";
+type Page = "chat" | "workspace" | "files" | "search" | "memory" | "tasks" | "recovery" | "activity" | "settings";
 
 const nav: Array<{ id: Page; label: string; enabled: boolean; phase?: string }> = [
   { id: "chat", label: "对话", enabled: true },
@@ -96,6 +98,7 @@ const nav: Array<{ id: Page; label: string; enabled: boolean; phase?: string }> 
   { id: "search", label: "资料检索", enabled: true },
   { id: "memory", label: "记忆", enabled: true },
   { id: "tasks", label: "任务", enabled: true },
+  { id: "recovery", label: "恢复中心", enabled: true },
   { id: "activity", label: "活动", enabled: true },
 ];
 
@@ -133,6 +136,7 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [activity, setActivity] = useState<ActivityRecord[]>([]);
+  const [recoveryEntries, setRecoveryEntries] = useState<RecoveryEntry[]>([]);
   const [taskRequest, setTaskRequest] = useState("");
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -201,6 +205,7 @@ export default function App() {
       setTasks([]);
       setAgentStatus(null);
       setActivity([]);
+      setRecoveryEntries([]);
       setTaskDetail(null);
       setSearchResults([]);
       setPreview(null);
@@ -224,7 +229,7 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory", "tasks", "activity"].includes(page)) return;
+    if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory", "tasks", "recovery", "activity"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
         listFiles(activeWorkspaceId),
@@ -237,8 +242,9 @@ export default function App() {
         listTasks(activeWorkspaceId),
         getAgentStatus(activeWorkspaceId),
         listActivity(activeWorkspaceId),
+        listRecovery(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity, nextRecovery]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
@@ -249,6 +255,7 @@ export default function App() {
           setTasks(nextTasks);
           setAgentStatus(nextAgentStatus);
           setActivity(nextActivity);
+          setRecoveryEntries(nextRecovery);
         })
         .catch(() => undefined);
     }, 3000);
@@ -266,7 +273,7 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity, nextRecovery] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
@@ -279,6 +286,7 @@ export default function App() {
       listTasks(workspaceId),
       getAgentStatus(workspaceId),
       listActivity(workspaceId),
+      listRecovery(workspaceId),
     ]);
     setRoots(nextRoots);
     setFiles(nextFiles);
@@ -292,6 +300,7 @@ export default function App() {
     setTasks(nextTasks);
     setAgentStatus(nextAgentStatus);
     setActivity(nextActivity);
+    setRecoveryEntries(nextRecovery);
     setActiveConversationId((current) => {
       if (current && nextConversations.some((item) => item.id === current)) return current;
       return nextConversations[0]?.id ?? "";
@@ -936,6 +945,42 @@ export default function App() {
     }
   }
 
+  async function onRecoverEntry(entry: RecoveryEntry) {
+    if (!entry.action || busy) return;
+    const verb = entry.action === "restore" ? "恢复" : "回滚";
+    const scope = entry.scope === "batch" ? `这一组 ${entry.item_count} 个文件` : entry.filenames[0] ?? "这个文件";
+    if (!window.confirm(`确认${verb}${scope}吗？DeskAI 将继续使用原事务的 SHA、no-overwrite、备份/隔离副本和事务一致性检查；不会绕过任何安全门禁。`)) return;
+
+    setBusy(true);
+    setNotice("");
+    try {
+      if (entry.entity_type === "source_edit") {
+        await rollbackSourceFileEdit(entry.id);
+      } else if (entry.entity_type === "source_edit_batch") {
+        await rollbackSourceFileEditBatch(entry.id);
+      } else if (entry.entity_type === "file_organization") {
+        await rollbackFileOrganization(entry.id);
+      } else if (entry.entity_type === "file_organization_batch") {
+        await rollbackFileOrganizationBatch(entry.id);
+      } else if (entry.entity_type === "file_recycle") {
+        await restoreRecycledFile(entry.id);
+      } else if (entry.entity_type === "file_recycle_batch") {
+        await restoreRecycleBatch(entry.id);
+      } else {
+        throw new Error("未知恢复事务类型");
+      }
+      await refreshWorkspaceData();
+      if (entry.task_id && taskDetail?.id === entry.task_id) {
+        setTaskDetail(await getTask(entry.task_id));
+      }
+      setNotice(`${verb}操作已通过原安全事务完成。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : `${verb}操作失败`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1159,6 +1204,16 @@ export default function App() {
             onRejectRecycleBatch={onRejectRecycleBatch}
             onRestoreRecycleBatch={onRestoreRecycleBatch}
           />
+        ) : page === "recovery" ? (
+          <RecoveryPage
+            entries={recoveryEntries}
+            disabled={!online || busy}
+            onRecover={onRecoverEntry}
+            onOpenTask={(taskId) => {
+              setPage("tasks");
+              void onSelectTask(taskId);
+            }}
+          />
         ) : page === "activity" ? (
           <ActivityPage activity={activity} />
         ) : (
@@ -1234,7 +1289,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 16 · AI + 文件事务 + 批量可恢复回收</span>
+          <span className="phase-chip">Phase 17 · AI + 文件事务 + 统一恢复中心</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -2174,6 +2229,141 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   );
 }
 
+function RecoveryPage({
+  entries,
+  disabled,
+  onRecover,
+  onOpenTask,
+}: {
+  entries: RecoveryEntry[];
+  disabled: boolean;
+  onRecover: (entry: RecoveryEntry) => void;
+  onOpenTask: (taskId: string) => void;
+}) {
+  const [filter, setFilter] = useState<"recoverable" | "attention" | "history" | "all">("recoverable");
+  const recoverable = entries.filter((item) => item.action !== null);
+  const attention = entries.filter((item) => item.recovery_required);
+  const history = entries.filter((item) => item.action === null && !item.recovery_required);
+  const shown =
+    filter === "recoverable"
+      ? recoverable
+      : filter === "attention"
+        ? attention
+        : filter === "history"
+          ? history
+          : entries;
+
+  return (
+    <section className="recovery-page">
+      <div className="knowledge-status-grid">
+        <Metric label="可恢复" value={String(recoverable.length)} />
+        <Metric label="需人工处理" value={String(attention.length)} />
+        <Metric label="历史记录" value={String(history.length)} />
+        <Metric label="总事务" value={String(entries.length)} />
+      </div>
+
+      <article className="panel recovery-panel">
+        <div className="panel-head recovery-head">
+          <div>
+            <h3>统一恢复中心</h3>
+            <p className="muted small">集中查看 Phase 11–16 的已应用编辑、路径事务和回收事务。恢复按钮继续调用原事务 API，不会绕过 SHA、no-overwrite、备份或隔离副本校验。</p>
+          </div>
+          <div className="recovery-filters">
+            {([
+              ["recoverable", "可恢复"],
+              ["attention", "需人工处理"],
+              ["history", "历史"],
+              ["all", "全部"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                className={filter === value ? "secondary active-filter" : "secondary"}
+                onClick={() => setFilter(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="recovery-list">
+          {shown.map((entry) => (
+            <article className={`recovery-card ${entry.recovery_required ? "needs-attention" : ""}`} key={`${entry.entity_type}:${entry.id}`}>
+              <div className="recovery-card-head">
+                <div>
+                  <div className="recovery-kind-row">
+                    <strong>{recoveryKindLabel(entry.entity_type)}</strong>
+                    {entry.transactional && <span className="risk-badge">事务</span>}
+                    <span className={`task-status ${entry.recovery_required ? "failed" : entry.action ? "blocked" : "completed"}`}>
+                      {recoveryStatusLabel(entry.status)}
+                    </span>
+                  </div>
+                  <span className="muted small">{formatDate(entry.updated_at)} · {entry.item_count} 个文件</span>
+                </div>
+                {entry.action && (
+                  <button className="primary" disabled={disabled} onClick={() => onRecover(entry)}>
+                    {entry.action === "restore" ? "恢复原文件" : "回滚事务"}
+                  </button>
+                )}
+              </div>
+
+              <p>{entry.summary || "无摘要"}</p>
+              <div className="recovery-files">
+                {entry.filenames.slice(0, 6).map((name, index) => (
+                  <span key={`${name}:${index}`}>{name}</span>
+                ))}
+                {entry.filenames.length > 6 && <span>+{entry.filenames.length - 6}</span>}
+              </div>
+              {entry.paths.slice(0, 2).map((path) => <code className="recovery-path" key={path}>{path}</code>)}
+              {entry.error_message && <div className="provider-error">{entry.error_message}</div>}
+              {entry.recovery_required && (
+                <div className="recovery-attention-row">
+                  <span className="muted small">自动恢复已停止。请先查看原 Task 与审计记录，核对磁盘实际状态。</span>
+                  {entry.task_id && <button className="secondary" onClick={() => onOpenTask(entry.task_id!)}>查看对应 Task</button>}
+                </div>
+              )}
+            </article>
+          ))}
+          {!shown.length && (
+            <p className="muted">
+              {filter === "recoverable"
+                ? "当前没有可自动恢复的事务。"
+                : filter === "attention"
+                  ? "当前没有需要人工处理的恢复异常。"
+                  : "当前筛选条件下没有记录。"}
+            </p>
+          )}
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function recoveryKindLabel(kind: string) {
+  const labels: Record<string, string> = {
+    source_edit: "单文件内容编辑",
+    source_edit_batch: "批量内容编辑",
+    file_organization: "单文件路径整理",
+    file_organization_batch: "批量路径整理",
+    file_recycle: "单文件回收",
+    file_recycle_batch: "批量回收",
+  };
+  return labels[kind] ?? kind;
+}
+
+function recoveryStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    applied: "已应用，可回滚",
+    rolling_back: "回滚中",
+    rolled_back: "已回滚",
+    recycled: "已回收，可恢复",
+    restoring: "恢复中",
+    restored: "已恢复",
+    recovery_required: "需要人工处理",
+  };
+  return labels[status] ?? status;
+}
+
 function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
   return (
     <section className="activity-page">
@@ -2421,7 +2611,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 16</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 17</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -2445,6 +2635,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> 回收隔离副本可恢复且不会在 Phase 15/16 永久清理；没有 purge/unlink 隔离副本的 Agent/API 能力</p>
           <p><b>✓</b> Phase 16 支持 2–10 文件 All-or-nothing 回收：全部隔离副本验证完成后才允许移除第一个原件</p>
           <p><b>✓</b> 批量回收/恢复中途失败会自动回到完整原件态或完整回收态；歧义状态冻结为 recovery_required</p>
+          <p><b>✓</b> Phase 17 恢复中心只聚合既有事务记录，不新增文件写入、删除或绕过确认的能力</p>
+          <p><b>✓</b> recovery_required 只允许查看对应 Task/审计，不提供强制覆盖或跳过 SHA 检查的“修复”按钮</p>
         </div>
       </article>
     </section>
@@ -2462,6 +2654,7 @@ function pageTitle(page: Page) {
   if (page === "search") return "资料检索与引用";
   if (page === "memory") return "长期记忆与自主学习";
   if (page === "tasks") return "Agent 任务";
+  if (page === "recovery") return "统一恢复中心";
   if (page === "activity") return "Agent 活动与审计";
   return "设置";
 }

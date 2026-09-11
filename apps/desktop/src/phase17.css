@@ -1,0 +1,94 @@
+.recovery-page {
+  display: grid;
+  gap: 18px;
+}
+
+.recovery-panel {
+  min-height: 420px;
+}
+
+.recovery-head {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.recovery-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.recovery-filters .active-filter {
+  font-weight: 700;
+  border-color: currentColor;
+}
+
+.recovery-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recovery-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.recovery-card.needs-attention {
+  border-style: dashed;
+}
+
+.recovery-card-head,
+.recovery-kind-row,
+.recovery-attention-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recovery-kind-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.recovery-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recovery-files span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  font-size: 12px;
+}
+
+.recovery-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recovery-attention-row {
+  align-items: flex-start;
+}
+
+@media (max-width: 900px) {
+  .recovery-head,
+  .recovery-card-head,
+  .recovery-attention-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recovery-filters {
+    justify-content: flex-start;
+  }
+}
