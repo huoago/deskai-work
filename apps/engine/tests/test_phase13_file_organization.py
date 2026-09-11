@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 from docx import Document
-from sqlalchemy import select
-
 from app.ai.provider import AgentResponse, AgentToolRequest
 from app.database.models import FileOrganizationProposal
 from app.security.secrets import SecretStatus
@@ -86,7 +84,7 @@ def _workspace_with_file(
 ):
     workspace = client.post("/workspaces", json={"name": f"Organize {filename}"}).json()
     root_path = tmp_path / f"root-{filename.replace('.', '-')}"
-    root_path.mkdir()
+    root_path.mkdir(parents=True)
     source = root_path / filename
     source.write_text(content, encoding="utf-8")
     root_response = client.post(
@@ -261,8 +259,6 @@ def test_phase13_move_is_limited_to_existing_directory_in_same_root(client, tmp_
     assert target.exists()
     assert not source.exists()
 
-    other_root = tmp_path / "other"
-    other_root.mkdir()
     second_workspace, _root2, file2, task2, _source2, _root_path2 = _workspace_with_file(
         client,
         tmp_path / "second-parent",
