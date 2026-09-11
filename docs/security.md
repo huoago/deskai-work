@@ -45,3 +45,25 @@ Automatic and manual Memory rejects obvious credentials and sensitive personal i
 Memory changes are reviewable. A changed value is versioned in `memory_versions`; deactivation is soft and reversible. Workspace memories do not cross project boundaries, while global memory is limited to durable cross-project preferences, constraints, and workflows.
 
 During chat, Memory is context below the current user instruction. A current user instruction overrides conflicting stored Memory. Memory is not represented as a file citation.
+
+
+## Agent execution boundary
+
+Phase 7 introduces model-directed tool selection without granting the model direct operating-system access.
+
+The model receives only tool definitions returned by ToolRegistry. Every attempted function call is independently re-authorized by PermissionGate immediately before local execution.
+
+The Phase 7 default allow-list contains only four read-only, Workspace-scoped tools:
+
+- `search_knowledge`
+- `search_memory`
+- `list_workspace_files`
+- `read_parsed_document`
+
+Unknown tools are treated as L8, confirmation-required operations and are denied. No delete, overwrite, shell, Python, browser/computer control, send, payment, or credential-reading tool is registered in this phase.
+
+Tool results and retrieved content are untrusted data. They cannot redefine Agent instructions, change permissions, or cause an unregistered tool to become available.
+
+All tool attempts are persisted in `tool_calls`, and execution outcomes are mirrored into `audit_logs`. A model statement that an action happened is never treated as evidence of execution without a completed local ToolCall record.
+
+Agent execution uses provider requests with `store=false`. Persistent task state, run state, tool state, and audit history remain in the local DeskAI database.
