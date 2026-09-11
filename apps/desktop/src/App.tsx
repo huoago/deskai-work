@@ -1062,7 +1062,7 @@ function WorkspacePage({ workspace, roots, files, counts, watcher, queue, parser
       </section>
       <section className="grid workspace-grid">
         <article className="panel">
-          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 安全边界</span></div>
+          <div className="panel-head"><h3>授权目录</h3><span>Phase 2 读取 + Phase 11 写入边界</span></div>
           <div className="list-stack">
             {roots.length ? roots.map((root) => (
               <div className="root-row" key={root.id}>
@@ -1660,6 +1660,9 @@ function activityLabel(action: string) {
     tool_completed: "工具调用完成",
     tool_failed: "工具调用失败",
     tool_denied: "工具调用被拒绝",
+    source_edit_applied: "源文件编辑已应用",
+    source_edit_rejected: "源文件编辑已拒绝",
+    source_edit_rolled_back: "源文件编辑已回滚",
   };
   return labels[action] ?? action;
 }
