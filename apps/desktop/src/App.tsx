@@ -1330,6 +1330,179 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess }: {
+  workspace: Workspace | null;
+  tasks: TaskRecord[];
+  status: AgentStatus | null;
+  detail: TaskDetail | null;
+  request: string;
+  setRequest: (value: string) => void;
+  disabled: boolean;
+  onCreate: () => void;
+  onSelect: (taskId: string) => void;
+  onRetry: (taskId: string) => void;
+  onProcess: () => void;
+}) {
+  const pending = tasks.filter((item) => item.status === "pending").length;
+  const running = tasks.filter((item) => item.status === "running").length;
+  const completed = tasks.filter((item) => item.status === "completed").length;
+  const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
+
+  return (
+    <section className="tasks-page">
+      <div className="knowledge-status-grid">
+        <Metric label="待执行" value={String(pending)} />
+        <Metric label="执行中" value={String(running)} />
+        <Metric label="已完成" value={String(completed)} />
+        <Metric label="需处理" value={String(attention)} />
+        <Metric label="Agent Worker" value={status?.running ? "运行中" : "未运行"} />
+      </div>
+
+      <article className="panel task-create-panel">
+        <div className="panel-head">
+          <div>
+            <h3>创建 Agent 任务</h3>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Phase 7 只允许读取知识库、记忆、授权文件清单和解析缓存。</p>
+          </div>
+          <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
+        </div>
+        <textarea
+          className="task-request"
+          value={request}
+          onChange={(event) => setRequest(event.target.value)}
+          placeholder="例如：查阅当前项目资料和长期记忆，整理324水表数量、来源及尚待确认的问题。"
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) onCreate();
+          }}
+        />
+        <div className="task-submit-row">
+          <span>Ctrl/⌘ + Enter 创建任务</span>
+          <button className="primary" onClick={onCreate} disabled={disabled || !request.trim()}>交给 Agent</button>
+        </div>
+      </article>
+
+      <div className="task-layout">
+        <article className="panel task-list-panel">
+          <div className="panel-head"><h3>任务队列</h3><span>{tasks.length} 个</span></div>
+          <div className="task-list">
+            {tasks.map((task) => (
+              <button
+                className={detail?.id === task.id ? "task-row selected" : "task-row"}
+                key={task.id}
+                onClick={() => onSelect(task.id)}
+              >
+                <div>
+                  <strong>{task.title}</strong>
+                  <span>{formatDate(task.created_at)}</span>
+                </div>
+                <div className="task-row-status">
+                  <span className={`task-status ${task.status}`}>{taskStatusLabel(task.status)}</span>
+                  <small>{Math.round(task.progress * 100)}%</small>
+                </div>
+              </button>
+            ))}
+            {!tasks.length && <p className="muted">还没有 Agent 任务。</p>}
+          </div>
+        </article>
+
+        <article className="panel task-detail-panel">
+          {!detail ? (
+            <div className="empty-task-detail"><h3>选择一个任务</h3><p className="muted">可查看结果、模型运行和完整工具调用记录。</p></div>
+          ) : (
+            <>
+              <div className="panel-head">
+                <div><h3>{detail.title}</h3><p className="muted small">{detail.user_request}</p></div>
+                <span className={`task-status ${detail.status}`}>{taskStatusLabel(detail.status)}</span>
+              </div>
+              <div className="task-progress-track"><span style={{ width: `${Math.round(detail.progress * 100)}%` }} /></div>
+
+              {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
+              {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
+
+              {["failed", "blocked"].includes(detail.status) && (
+                <button className="secondary" onClick={() => onRetry(detail.id)} disabled={disabled}>重新入队</button>
+              )}
+
+              <div className="task-run-summary">
+                <span>运行 {detail.runs.length} 次</span>
+                <span>工具调用 {detail.tool_calls.length} 次</span>
+                <span>开始 {detail.started_at ? formatDate(detail.started_at) : "—"}</span>
+              </div>
+
+              <div className="tool-call-list">
+                {detail.tool_calls.map((call) => (
+                  <article className="tool-call-card" key={call.id}>
+                    <div><strong>{call.tool_name}</strong><span>风险 L{call.risk_level} · {call.status}</span></div>
+                    <code>{JSON.stringify(call.arguments ?? {}, null, 2)}</code>
+                    {call.result_summary && <p>{call.result_summary}</p>}
+                  </article>
+                ))}
+                {!detail.tool_calls.length && <p className="muted small">该任务尚未产生工具调用。</p>}
+              </div>
+            </>
+          )}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function ActivityPage({ activity }: { activity: ActivityRecord[] }) {
+  return (
+    <section className="activity-page">
+      <article className="panel activity-panel">
+        <div className="panel-head">
+          <div><h3>Agent 审计日志</h3><p className="muted small">每次 Agent 启动、工具完成、拒绝和失败都会留下持久化记录。</p></div>
+          <span>{activity.length} 条</span>
+        </div>
+        <div className="activity-list">
+          {activity.map((item) => (
+            <article className="activity-row" key={item.id}>
+              <div className="activity-time">{formatDate(item.timestamp)}</div>
+              <div className="activity-main">
+                <div>
+                  <strong>{activityLabel(item.action)}</strong>
+                  {item.tool && <span className="activity-tool">{item.tool}</span>}
+                  <span className={`risk-badge risk-${Math.min(item.risk_level, 8)}`}>L{item.risk_level}</span>
+                </div>
+                {item.result && <p>{item.result}</p>}
+                <small>{item.task_id ? `Task ${item.task_id.slice(0, 8)}` : "系统事件"}</small>
+              </div>
+            </article>
+          ))}
+          {!activity.length && <p className="muted">当前 Workspace 还没有 Agent 审计事件。</p>}
+        </div>
+      </article>
+    </section>
+  );
+}
+
+function taskStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "待执行",
+    running: "执行中",
+    completed: "已完成",
+    failed: "失败",
+    blocked: "已阻断",
+  };
+  return labels[status] ?? status;
+}
+
+function activityLabel(action: string) {
+  const labels: Record<string, string> = {
+    agent_started: "Agent 开始",
+    agent_completed: "Agent 完成",
+    agent_failed: "Agent 失败",
+    agent_blocked: "Agent 被策略阻断",
+    agent_interrupted: "Agent 异常中断",
+    worker_failed: "Worker 失败",
+    tool_completed: "工具调用完成",
+    tool_failed: "工具调用失败",
+    tool_denied: "工具调用被拒绝",
+  };
+  return labels[action] ?? action;
+}
+
 function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, apiKeyDraft, setApiKeyDraft, providerAction, onSaveApiKey, onDeleteApiKey, onTestProvider }: {
   values: DesktopSettings;
   onChange: (values: DesktopSettings) => void;
