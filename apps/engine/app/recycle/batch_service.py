@@ -127,8 +127,8 @@ class FileRecycleBatchService:
                     )
 
             for snapshot in snapshots:
-                self._remove_source(snapshot)
                 removed.append(snapshot)
+                self._remove_source(snapshot)
                 self.recycle_service._verify_quarantine(
                     snapshot["quarantine"],
                     snapshot["original_sha256"],
@@ -234,12 +234,12 @@ class FileRecycleBatchService:
         restored: list[dict[str, Any]] = []
         try:
             for snapshot in snapshots:
+                restored.append(snapshot)
                 self.recycle_service._restore_copy_no_overwrite(
                     snapshot["quarantine"],
                     snapshot["original"],
                     snapshot["original_sha256"],
                 )
-                restored.append(snapshot)
         except Exception as exc:
             failures = self._remove_restored_originals(snapshots)
             if failures:
