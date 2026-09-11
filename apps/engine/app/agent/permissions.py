@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from sqlalchemy import select
+
+from app.database.models import Permission
+from app.database.session import Database
+
+PHASE7_TOOL_POLICY: dict[str, tuple[int, bool]] = {
+    "search_knowledge": (1, False),
+    "search_memory": (1, False),
+    "list_workspace_files": (2, False),
+    "read_parsed_document": (2, False),
+}
+
+
+@dataclass(slots=True)
+class PermissionDecision:
+    allowed: bool
+    risk_level: int
+    requires_confirmation: bool
+    reason: str
+
+
+class PermissionGate:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+    def check(self, *, workspace_id: str | None, tool_name: str) -> PermissionDecision:
+        policy = PHASE7_TOOL_POLICY.get(tool_name)
+        if policy is None:
+            return PermissionDecision(False, 8, True, "Tool is not enabled in Phase 7")
+        risk_level, requires_confirmation = policy
+        if not workspace_id:
+            return PermissionDecision(
+                False,
+                risk_level,
+                requires_confirmation,
+                "Phase 7 tools require an active Workspace",
+            )
+
+        capability = f"agent.tool.{tool_name}"
+        with self.database.session() as session:
+            records = list(
+                session.scalars(
+                    select(Permission).where(
+                        Permission.capability == capability,
+                        Permission.workspace_id.in_([workspace_id, None]),
+                    )
+                ).all()
+            )
+
+        explicit: Any | None = None
+        workspace_match = next(
+            (item for item in records if item.workspace_id == workspace_id),
+            None,
+        )
+        global_match = next((item for item in records if item.workspace_id is None), None)
+        selected = workspace_match or global_match
+        if selected is not None:
+            explicit = selected.value_json
+
+        allowed = _permission_value(explicit, default=True)
+        return PermissionDecision(
+            allowed=allowed,
+            risk_level=risk_level,
+            requires_confirmation=requires_confirmation,
+            reason="Allowed by Phase 7 read-only policy" if allowed else "Explicitly disabled",
+        )
+
+
+def _permission_value(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        raw = value.get("allowed")
+        return bool(raw) if raw is not None else default
+    return default
