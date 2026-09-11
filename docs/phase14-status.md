@@ -1,6 +1,6 @@
 # Phase 14 — Transactional file organization
 
-Status: implemented on the Phase 14 branch and pending full CI verification.
+Status: complete, verified by full CI, and merged to `main`.
 
 ## Objective
 
@@ -93,14 +93,27 @@ Phase 14 tests cover:
 - duplicate File ids are rejected;
 - Agent can only stage a pending organization batch.
 
-Required CI gates:
+### Merge verification
 
-- Ruff;
-- full Engine Pytest suite;
-- TypeScript typecheck;
-- Vite production build;
-- Windows PyInstaller sidecar;
-- packaged Engine 0.14.0 smoke;
-- packaged `/file-operation-batches` API smoke;
-- Tauri NSIS/MSI;
-- Windows Artifact upload.
+Feature PR #20 passed the complete CI pipeline on Run #72 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **90 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.14.0** health smoke — passed;
+- packaged `/file-operation-batches` API smoke — passed;
+- Tauri Windows NSIS/MSI build — passed;
+- Windows Artifact upload — passed.
+
+Feature PR #20 was squash merged to `main` as commit:
+
+`b90d62a7afd61a9b3dab0d4026afe0f937d89d24`
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10277531358`;
+- size: `394265837` bytes;
+- SHA-256: `4ad64a8720980061d680c642c1739219d0b060af177ba9fe4455343b9d585b6d`.
