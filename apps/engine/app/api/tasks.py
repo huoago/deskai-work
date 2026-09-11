@@ -135,6 +135,10 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
             limit=100,
         )
     )
+    payload["recycle_proposals"] = request.app.state.file_recycle_service.list(
+        task_id=task_id,
+        limit=100,
+    )
     return payload
 
 
