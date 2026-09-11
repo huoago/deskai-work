@@ -11,6 +11,7 @@ from app import __version__
 from app.api.artifacts import router as artifacts_router
 from app.api.chat import router as chat_router
 from app.api.errors import AppError, app_error_handler
+from app.api.file_operations import router as file_operations_router
 from app.api.files import router as files_router
 from app.api.health import router as health_router
 from app.api.knowledge import router as knowledge_router
@@ -31,6 +32,7 @@ from app.artifacts.service import ArtifactService
 from app.core.config import Settings
 from app.database.migrate import run_migrations
 from app.database.session import Database
+from app.file_ops.service import FileOrganizationService
 from app.indexing.watcher import WorkspaceWatcher
 from app.knowledge.search import HybridSearch
 from app.knowledge.service import KnowledgeIndexer
@@ -112,6 +114,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.source_edit_batch_service = source_edit_batch_service
         source_edit_batch_service.recover_incomplete_batches()
+        file_organization_service = FileOrganizationService(
+            app.state.database,
+            source_edit_service,
+        )
+        app.state.file_organization_service = file_organization_service
+        file_organization_service.recover_incomplete_operations()
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
@@ -122,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             web_research_service,
             source_edit_service,
             source_edit_batch_service,
+            file_organization_service,
         )
         app.state.tool_registry = tool_registry
         agent_orchestrator = AgentOrchestrator(
@@ -193,6 +202,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(artifacts_router)
     app.include_router(workspace_router)
     app.include_router(roots_router)
+    app.include_router(file_operations_router)
     app.include_router(files_router)
     app.include_router(knowledge_router)
     app.include_router(memory_router)

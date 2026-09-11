@@ -1,0 +1,39 @@
+.file-organization-section {
+  border-style: dashed;
+}
+
+.file-organization-card {
+  gap: 12px;
+}
+
+.organization-path-change {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.organization-path-change code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.organization-path-change > span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .organization-path-change {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-path-change > span {
+    transform: rotate(90deg);
+    justify-self: start;
+  }
+}

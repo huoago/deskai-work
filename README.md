@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 12 are complete, fully verified, and merged to `main`.**
+**Phase 0 through Phase 12 are complete, fully verified, and merged to `main`. Phase 13 controlled file organization is implemented and pending full CI verification.**
 
 Implemented foundations:
 
@@ -56,9 +56,11 @@ Implemented foundations:
 - staged single-file TXT/MD/DOCX/XLSX source edits with explicit confirmation
 - 2–10 file transactional edit batches with all-or-nothing confirmation
 - batch-wide SHA/write/lock preflight, backups, failure rollback, and startup recovery
+- staged single-file rename/move proposals inside the same authorized writable Workspace root
+- no-overwrite target checks, SHA revalidation, Office lock checks, path rollback, and startup recovery for file organization
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, and stage coordinated 2–10 file all-or-nothing edit transactions. Source files are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, backups, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, file delete/move/rename, or unconfirmed destructive file operations.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, stage coordinated 2–10 file all-or-nothing edit transactions, and stage confirmed single-file rename/move operations inside one authorized writable Workspace root. Source content or paths are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, no-overwrite rules, rollback safeguards, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, file deletion, directory operations, cross-root moves, target overwrite, or unattended destructive file operations.
 
 ## V1 phase boundaries
 
@@ -73,9 +75,11 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 8 — Safe artifacts:** complete with a generated-artifact registry, sandboxed DOCX/XLSX creation, path traversal protection, no-overwrite semantics, spreadsheet formula-injection neutralization, and artifact UI.
 - **Phase 9 — Controlled analysis:** complete with a bounded AST numeric evaluator plus Workspace-scoped CSV/XLSX inspect, summary, and grouped aggregation tools.
 - **Phase 10 — Controlled web research:** complete with provider-backed public web search, source URL preservation, secret-query filtering, Local Only enforcement, and L2 audit gating.
-- Later phases add stronger OS-isolated computation and separately gated source-file write capabilities.
+- **Phase 11 — Confirmed source edits:** complete with staged TXT/MD/DOCX/XLSX source edits, write authorization, explicit confirmation, SHA protection, backup, reindexing, and rollback.
+- **Phase 12 — Transactional multi-file edits:** complete with 2–10 file all-or-nothing edit batches, batch-wide preflight, backup, failure rollback, startup recovery, and Windows verification.
+- **Phase 13 — Controlled file organization:** implemented with proposal-only single-file rename/move, same-root enforcement, extension preservation, no-overwrite semantics, SHA/lock revalidation, same-File-id path updates, rollback, and startup recovery; pending full CI verification.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, and `docs/phase12-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, and `docs/phase13-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -152,6 +156,6 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Web research cannot fetch arbitrary URLs, download files, control a browser, execute webpage instructions, or access local files by itself.
 - Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
 - Unknown or destructive tool names are denied by default.
-- Source-file delete/move and arbitrary overwrite actions remain unavailable; Phase 11 supports only confirmed TXT/MD/DOCX/XLSX edits through the proposal workflow.
+- Phase 13 adds only confirmed single-file rename/move inside the same authorized writable Workspace root. File deletion, directory operations, cross-root moves, extension changes, target overwrite, and arbitrary destination writes remain unavailable.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.

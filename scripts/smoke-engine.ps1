@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.12.0") {
+  if ([string]$health.version -ne "0.13.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.12.0, got $($health.version)."
+    throw "Expected packaged engine version 0.13.0, got $($health.version)."
   }
 
   try {
@@ -110,6 +110,15 @@ try {
   }
 
   Write-Host "Packaged Source Edit Batch endpoint OK: count=$(@($editBatches).Count)"
+
+  try {
+    $fileOperations = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/file-operations" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged File Organization API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged File Organization endpoint OK: count=$(@($fileOperations).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

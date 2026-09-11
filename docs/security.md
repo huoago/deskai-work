@@ -200,3 +200,83 @@ For each member, automatic recovery acts only when the current file hash equals 
 If any member has an unknown hash, missing/corrupt backup, or cannot be safely restored, the whole batch enters `recovery_required`. DeskAI then performs no further automatic writes for that batch.
 
 Phase 12 still does not add arbitrary destination writes, source deletion, rename/move, unrestricted Python, shell/subprocess execution, browser control, or unattended source-file mutation.
+
+
+## Controlled file organization boundary
+
+Phase 13 adds the first controlled source-file path changes.
+
+The Agent receives only `propose_file_organization`, an L3 staging tool. It can propose one of two operations for one existing Workspace file:
+
+- `rename` within the file's current directory;
+- `move` into an already-existing subdirectory of the **same** authorized writable Workspace root.
+
+The tool only records a proposal. It cannot rename or move the file itself.
+
+Proposal creation requires:
+
+- the File belongs to the active Workspace;
+- the File is inside a readable root with `write_allowed=true`;
+- the source is a regular non-symlink file;
+- the on-disk SHA-256 still matches DeskAI's File record;
+- no other active organization proposal exists for that File;
+- the File is not currently in a parser/indexer `processing` job.
+
+Rename proposals must preserve the current file extension and reject Windows-invalid or reserved names.
+
+Move proposals accept only a relative directory under the same Workspace root. The directory must already exist. Phase 13 does not create directories.
+
+The target path must not already exist. DeskAI never uses Phase 13 as an overwrite path.
+
+### Desktop-confirmed path change
+
+Actual path mutation is available only through the trusted loopback desktop confirmation API.
+
+Before the path changes, DeskAI revalidates:
+
+1. task / Workspace / File ownership;
+2. current writable root authorization;
+3. source path is still the path captured by the proposal;
+4. current source SHA-256 still equals the proposal hash;
+5. target is still absent;
+6. target directory still exists and is writable;
+7. source and target directory are on the same filesystem/device;
+8. source is writable/not busy;
+9. DOCX/XLSX is not accompanied by a Microsoft Office `~$` lock file.
+
+On Windows, DeskAI uses no-overwrite rename semantics. On POSIX CI/dev hosts, the same-device implementation uses hard-link creation followed by source unlink so destination creation fails when the target already exists.
+
+After a successful path change, DeskAI updates the existing File record in place. The `File.id`, content SHA-256, and existing FileVersion relationships are preserved.
+
+The root is rescanned so path metadata stays synchronized, but unchanged file content is not treated as a new document.
+
+### Rollback
+
+A separately confirmed rollback can restore the original path only when:
+
+- the current file still has the exact SHA-256 applied by DeskAI;
+- the original path is still unoccupied;
+- both paths remain inside the same writable root;
+- the source is not busy/locked.
+
+If the file content changed after the rename/move, rollback is blocked instead of moving the newer external/user version.
+
+### Interrupted-process recovery
+
+Path changes persist `applying` and `rolling_back` states before filesystem mutation.
+
+At Engine startup, Phase 13 inspects incomplete operations. Automatic recovery proceeds only when exactly one of the original or target paths contains the expected SHA-256.
+
+If DeskAI cannot unambiguously identify a safe state, the proposal enters `recovery_required` and no further automatic path mutation is attempted.
+
+Phase 13 still does **not** provide:
+
+- file deletion;
+- directory rename/move/delete;
+- target overwrite;
+- cross-Workspace or cross-root moves;
+- cross-device moves;
+- arbitrary destination paths;
+- extension-changing renames;
+- unattended Agent path mutation;
+- shell, unrestricted Python, or GUI/browser control.

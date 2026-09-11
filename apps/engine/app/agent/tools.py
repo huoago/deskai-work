@@ -40,6 +40,7 @@ class ToolRegistry:
         web_research_service,
         source_edit_service,
         source_edit_batch_service,
+        file_organization_service,
     ) -> None:
         self.database = database
         self.hybrid_search = hybrid_search
@@ -50,6 +51,7 @@ class ToolRegistry:
         self.web_research_service = web_research_service
         self.source_edit_service = source_edit_service
         self.source_edit_batch_service = source_edit_batch_service
+        self.file_organization_service = file_organization_service
         self.permission_gate = PermissionGate(database)
         self._specs = {spec.name: spec for spec in _tool_specs()}
         self._handlers: dict[
@@ -69,6 +71,7 @@ class ToolRegistry:
             "search_web": self._search_web,
             "propose_source_file_edit": self._propose_source_file_edit,
             "propose_source_file_edit_batch": self._propose_source_file_edit_batch,
+            "propose_file_organization": self._propose_file_organization,
         }
 
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
@@ -467,6 +470,22 @@ class ToolRegistry:
             workspace_id=workspace_id,
             summary=str(arguments.get("summary") or ""),
             edits=edits,
+        )
+
+    def _propose_file_organization(
+        self,
+        task_id: str,
+        workspace_id: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self.file_organization_service.propose(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            file_id=str(arguments.get("file_id") or ""),
+            operation=str(arguments.get("operation") or ""),
+            summary=str(arguments.get("summary") or ""),
+            new_name=str(arguments.get("new_name") or ""),
+            target_relative_dir=str(arguments.get("target_relative_dir") or ""),
         )
 
     def _aggregate_table(
@@ -876,6 +895,47 @@ def _tool_specs() -> list[ToolSpec]:
                     },
                 },
                 "required": ["summary", "edits"],
+                "additionalProperties": False,
+            },
+        ),
+        ToolSpec(
+            name="propose_file_organization",
+            description=(
+                "Stage a rename or move proposal for one existing Workspace file. "
+                "This tool NEVER changes the path itself. Rename must preserve the "
+                "extension. Move is limited to an existing directory inside the same "
+                "authorized writable Workspace root. Targets must not exist, and a "
+                "human must confirm the proposal in the desktop UI."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_id": {"type": "string", "minLength": 1},
+                    "operation": {
+                        "type": "string",
+                        "enum": ["rename", "move"],
+                    },
+                    "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                    },
+                    "new_name": {
+                        "type": "string",
+                        "maxLength": 240,
+                    },
+                    "target_relative_dir": {
+                        "type": "string",
+                        "maxLength": 1000,
+                    },
+                },
+                "required": [
+                    "file_id",
+                    "operation",
+                    "summary",
+                    "new_name",
+                    "target_relative_dir",
+                ],
                 "additionalProperties": False,
             },
         ),

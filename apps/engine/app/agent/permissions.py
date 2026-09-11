@@ -22,6 +22,7 @@ AGENT_TOOL_POLICY: dict[str, tuple[int, bool]] = {
     "search_web": (2, False),
     "propose_source_file_edit": (3, False),
     "propose_source_file_edit_batch": (3, False),
+    "propose_file_organization": (3, False),
 }
 
 
