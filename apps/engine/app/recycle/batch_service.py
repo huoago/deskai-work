@@ -241,7 +241,7 @@ class FileRecycleBatchService:
                 )
                 restored.append(snapshot)
         except Exception as exc:
-            failures = self._remove_restored_originals(restored)
+            failures = self._remove_restored_originals(snapshots)
             if failures:
                 self._mark_recovery_required(
                     batch_id,
@@ -269,7 +269,7 @@ class FileRecycleBatchService:
         try:
             self._finalize_restored(batch_id, snapshots, now)
         except Exception as exc:
-            failures = self._remove_restored_originals(restored)
+            failures = self._remove_restored_originals(snapshots)
             if failures:
                 self._mark_recovery_required(
                     batch_id,
