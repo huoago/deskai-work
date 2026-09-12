@@ -1665,7 +1665,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 23 · 后台持久化工作计划执行器</span>
+          <span className="phase-chip">Phase 24 · 工作计划监督与人工控制</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -2171,7 +2171,7 @@ function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, req
         <div className="panel-head">
           <div>
             <h3>创建工作任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。可继续使用即时 Agent，也可以先生成 Phase 23 后台多步骤计划。计划会持久化步骤、依赖、风险和执行结果，并由专用 Worker 后台推进；现有文件编辑/整理/回收仍只生成原 Phase 11–16 提案，并在人工确认门禁处暂停。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。可继续使用即时 Agent，也可以生成 Phase 24 受监督后台计划。计划会持久化步骤、依赖、风险、预算、审批与执行结果，并由专用 Worker 在人工监督边界内推进；现有文件编辑/整理/回收仍只生成原 Phase 11–16 提案，并在人工确认门禁处暂停。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -3485,8 +3485,11 @@ function taskStatusLabel(status: string) {
     pending: "待执行",
     queued: "后台排队",
     running: "执行中",
+    pausing: "正在安全暂停",
     cancelling: "正在安全取消",
-    awaiting_confirmation: "等待人工确认",
+    paused: "已暂停",
+    awaiting_confirmation: "等待文件确认",
+    awaiting_step_approval: "等待步骤审批",
     completed: "已完成",
     failed: "失败",
     blocked: "已阻断",
@@ -3500,12 +3503,14 @@ function workPlanStatusLabel(status: string) {
     ready: "待开始",
     queued: "后台排队",
     running: "执行中",
+    pausing: "正在安全暂停",
     cancelling: "正在安全取消",
-    awaiting_confirmation: "等待人工确认",
+    awaiting_confirmation: "等待文件确认",
+    awaiting_step_approval: "等待步骤审批",
     completed: "已完成",
     failed: "失败",
     blocked: "已阻断",
-    paused: "中断待重试",
+    paused: "已暂停",
     cancelled: "已取消",
   };
   return labels[status] ?? status;
@@ -3515,8 +3520,10 @@ function workPlanStepStatusLabel(status: string) {
   const labels: Record<string, string> = {
     pending: "待执行",
     running: "执行中",
-    awaiting_confirmation: "等待人工确认",
+    awaiting_confirmation: "等待文件确认",
+    awaiting_step_approval: "等待步骤审批",
     completed: "已完成",
+    skipped: "已跳过",
     failed: "失败",
     interrupted: "中断",
     cancelled: "已取消",
@@ -3554,6 +3561,16 @@ function activityLabel(action: string) {
     work_plan_startup_cancelled: "启动时完成取消恢复",
     work_plan_cancel_requested: "已请求安全取消计划",
     work_plan_step_completed_after_cancel_request: "当前步骤完成后停止计划",
+    work_plan_pause_requested: "已请求暂停计划",
+    work_plan_paused: "工作计划已暂停",
+    work_plan_continued: "工作计划继续执行",
+    work_plan_supervision_updated: "计划监督参数已更新",
+    work_plan_step_approval_required: "计划步骤等待人工审批",
+    work_plan_step_approved: "计划步骤已批准",
+    work_plan_step_skipped: "计划步骤已跳过",
+    work_plan_budget_exhausted: "计划执行预算已耗尽",
+    work_plan_step_timeout_detected: "计划步骤超过监督超时",
+    work_plan_startup_paused: "启动时恢复暂停状态",
     tool_completed: "工具调用完成",
     tool_failed: "工具调用失败",
     tool_denied: "工具调用被拒绝",
@@ -3677,7 +3694,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 23</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 24</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -3715,6 +3732,11 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 23 Start/Resume/Retry 只写入持久化队列并唤醒 WorkPlanWorker，HTTP 请求不再同步跑完整计划</p>
           <p><b>✓</b> 重启时只自动恢复“没有 running 步骤”的安全检查点；未证明完成的 running 步骤仍冻结为 interrupted</p>
           <p><b>✓</b> 执行中取消不会强杀当前工具；当前工具安全返回后停止后续步骤，已经创建的文件提案保持独立可审核状态</p>
+          <p><b>✓</b> Phase 24 Pause/软超时不强杀正在运行的工具；当前工具安全返回后才停止后续步骤</p>
+          <p><b>✓</b> Step Skip 只允许未执行的 auto 步骤，且不能跳过文件提案门禁或仍被后续活动步骤依赖的步骤</p>
+          <p><b>✓</b> 风险审批阈值只增加额外人工门禁，不能降低 PermissionGate 风险等级，也不能替代 Phase 11–16 文件确认</p>
+          <p><b>✓</b> 步数/运行时间预算耗尽会暂停计划；失败策略只有 pause/stop，不提供自动跳过失败步骤</p>
+          <p><b>✓</b> Plan Event 时间线与未读通知仅记录监督状态，不授予新的文件、系统或网络权限</p>
         </div>
       </article>
     </section>
@@ -3765,4 +3787,11 @@ function formatBytes(bytes: number) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDurationSeconds(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} 秒`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)} 分钟`;
+  return `${(seconds / 3600).toFixed(1)} 小时`;
 }
