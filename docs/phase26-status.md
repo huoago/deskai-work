@@ -1,6 +1,6 @@
 # Phase 26 — Controlled Update & Release Verification
 
-Status: implementation complete on `phase26-controlled-update-verification`; pending CI and merge.
+Status: complete, fully verified, and merged to `main`.
 
 ## Objective
 
@@ -101,15 +101,25 @@ Phase 26 introduces one narrowly scoped public-network operation:
 - failed verification is fail-closed for the recommended-update UI;
 - current Phase 11–24 confirmation and recovery state machines remain authoritative.
 
-## Verification target
+## Verification
 
-- Ruff across Engine;
-- full Engine pytest suite including Phase 26 release-evidence tests;
-- Local Only API blocking test;
-- TypeScript typecheck including the new update control/client;
-- Vite production build;
-- packaged Engine smoke;
-- Windows NSIS/MSI build;
-- checksum generation and artifact upload.
+- Feature PR: #47 — Phase 26 — Controlled Update & Release Verification.
+- Verified feature head: `dc8e5828891a0e7d48e3600ddc465da7a3c26f24`.
+- Feature merge SHA on `main`: `926781d2706005de74fe72e185e671ef1534b100`.
+- Final feature CI: Run #140, workflow run ID `34708409183`, success across Engine, desktop-web, and windows-native.
+- Ruff: all checks passed.
+- Engine: `173 passed, 59 warnings`.
+- Desktop TypeScript typecheck: passed.
+- Vite production build: passed.
+- Packaged Engine smoke: passed with Engine `0.26.0`.
+- Windows NSIS/MSI build: passed.
+- Installer checksum generation: passed.
+- Windows Artifact: `DeskAI-Work-Windows`, artifact ID `10302727108`, size `394644287` bytes.
+- Artifact ZIP SHA-256: `96b7287f9cc6da3798c1f0c60373419d40cdb639a1437cfdf49d0e98ab88086c`.
+- Artifact created: `2026-09-12T17:44:16Z`; expires: `2026-10-12T17:44:04Z`.
+- Artifact upload is bound to feature head `dc8e5828891a0e7d48e3600ddc465da7a3c26f24`.
+- CI confirms the artifact contains generated Windows installer output and `SHA256SUMS.txt`; the checksum-generation and upload gates both completed successfully.
+- No GitHub Release was published during Phase 26 closeout.
+- No auto-download, auto-install, silent updater, Workspace mutation authority, shell authority, or destructive authority was added.
 
-Final CI run, artifact metadata, merge SHA, and final `main` SHA will be recorded during closeout.
+Phase 26 is merged to `main`; this closeout records the verified feature merge and release-readiness evidence.
