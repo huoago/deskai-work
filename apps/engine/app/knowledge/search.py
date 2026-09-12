@@ -199,7 +199,12 @@ def _terms(text: str) -> set[str]:
 
 
 def _engineering_identifiers(text: str) -> set[str]:
-    return {match.group(0).lower() for match in ENGINEERING_ID_RE.finditer(text)}
+    identifiers: set[str] = set()
+    for match in ENGINEERING_ID_RE.finditer(text):
+        identifier = match.group(0).lower().rstrip("._/:+-")
+        if identifier:
+            identifiers.add(identifier)
+    return identifiers
 
 
 def _rerank(query_terms: set[str], content: str, filename: str, section: str | None) -> float:
