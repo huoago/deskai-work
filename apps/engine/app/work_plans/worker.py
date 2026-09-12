@@ -20,6 +20,8 @@ class WorkPlanWorkerSnapshot:
     failed: int
     blocked: int
     awaiting_confirmation: int
+    awaiting_step_approval: int
+    paused: int
     cancelled: int
     last_plan_id: str | None
     last_completed_at: str | None
@@ -33,6 +35,8 @@ class WorkPlanWorkerSnapshot:
             "failed": self.failed,
             "blocked": self.blocked,
             "awaiting_confirmation": self.awaiting_confirmation,
+            "awaiting_step_approval": self.awaiting_step_approval,
+            "paused": self.paused,
             "cancelled": self.cancelled,
             "last_plan_id": self.last_plan_id,
             "last_completed_at": self.last_completed_at,
@@ -57,6 +61,8 @@ class WorkPlanWorker:
         self._failed = 0
         self._blocked = 0
         self._awaiting_confirmation = 0
+        self._awaiting_step_approval = 0
+        self._paused = 0
         self._cancelled = 0
         self._last_plan_id: str | None = None
         self._last_completed_at: str | None = None
@@ -94,6 +100,8 @@ class WorkPlanWorker:
                 failed=self._failed,
                 blocked=self._blocked,
                 awaiting_confirmation=self._awaiting_confirmation,
+                awaiting_step_approval=self._awaiting_step_approval,
+                paused=self._paused,
                 cancelled=self._cancelled,
                 last_plan_id=self._last_plan_id,
                 last_completed_at=self._last_completed_at,
@@ -169,12 +177,16 @@ class WorkPlanWorker:
             self._processed += 1
             if status == "completed":
                 self._completed += 1
-            elif status in {"failed", "paused"}:
+            elif status == "failed":
                 self._failed += 1
             elif status == "blocked":
                 self._blocked += 1
             elif status == "awaiting_confirmation":
                 self._awaiting_confirmation += 1
+            elif status == "awaiting_step_approval":
+                self._awaiting_step_approval += 1
+            elif status == "paused":
+                self._paused += 1
             elif status == "cancelled":
                 self._cancelled += 1
             self._last_plan_id = plan_id
