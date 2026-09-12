@@ -1498,6 +1498,165 @@ class WorkPlanService:
             return "recycled"
         raise ValueError("Unsupported proposal-gate tool")
 
+    @staticmethod
+    def _budget_exhaustion_reason(plan: WorkPlan) -> str | None:
+        if plan.auto_steps_used >= plan.max_auto_steps:
+            return (
+                f"Automatic step budget exhausted: "
+                f"{plan.auto_steps_used}/{plan.max_auto_steps}"
+            )
+        if plan.runtime_seconds_used >= plan.runtime_budget_seconds:
+            return (
+                f"Runtime budget exhausted: "
+                f"{plan.runtime_seconds_used:.1f}/"
+                f"{plan.runtime_budget_seconds} seconds"
+            )
+        return None
+
+    @staticmethod
+    def _step_needs_approval(plan: WorkPlan, step: WorkPlanStep) -> bool:
+        if step.execution_mode != "auto":
+            return False
+        threshold = int(plan.approval_risk_threshold)
+        if threshold >= 4:
+            return False
+        return step.risk_level >= threshold and step.approved_at is None
+
+    def _record_attempt_runtime(
+        self,
+        plan_id: str,
+        step_id: str,
+        duration: float,
+        *,
+        run_id: str,
+    ) -> bool:
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            step = session.get(WorkPlanStep, step_id)
+            if plan is None or step is None:
+                raise RuntimeError("Work plan step disappeared while recording runtime")
+            step.duration_seconds = float(duration)
+            plan.runtime_seconds_used += float(duration)
+            timeout_exceeded = duration > float(plan.step_timeout_seconds)
+            step.timeout_exceeded = timeout_exceeded
+            if timeout_exceeded:
+                self._event(
+                    session,
+                    plan,
+                    step_id=step.id,
+                    event_type="step_timeout_detected",
+                    severity="warning",
+                    message=(
+                        f"Step {step.position} ran for {duration:.1f}s, exceeding "
+                        f"the {plan.step_timeout_seconds}s supervised timeout"
+                    ),
+                    data={
+                        "duration_seconds": duration,
+                        "step_timeout_seconds": plan.step_timeout_seconds,
+                        "tool_name": step.tool_name,
+                    },
+                )
+                session.add(
+                    AuditLog(
+                        task_id=plan.task_id,
+                        agent_run_id=run_id,
+                        action="work_plan_step_timeout_detected",
+                        target=step.id,
+                        result=(
+                            f"duration_seconds={duration:.3f}; "
+                            f"limit={plan.step_timeout_seconds}"
+                        ),
+                        risk_level=step.risk_level,
+                    )
+                )
+            return timeout_exceeded
+
+    def _finalize_pause(
+        self,
+        plan_id: str,
+        *,
+        run_id: str | None = None,
+        reason: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None or plan.status == "paused":
+                return
+            if plan.status in {"completed", "cancelled"}:
+                return
+            task = session.get(Task, plan.task_id)
+            plan.status = "paused"
+            plan.paused_at = now
+            plan.pause_reason = reason[:4000]
+            plan.error_message = plan.pause_reason
+            if task is not None:
+                task.status = "paused"
+                task.error_message = plan.pause_reason
+            if run_id:
+                run = session.get(AgentRun, run_id)
+                if run is not None:
+                    run.status = "paused"
+                    run.completed_at = now
+            self._event(
+                session,
+                plan,
+                event_type="paused",
+                severity="action",
+                message=plan.pause_reason,
+                data={},
+            )
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    agent_run_id=run_id,
+                    action="work_plan_paused",
+                    target=plan.id,
+                    result=plan.pause_reason,
+                    risk_level=0,
+                )
+            )
+
+    @staticmethod
+    def _event(
+        session,
+        plan: WorkPlan,
+        *,
+        event_type: str,
+        severity: str,
+        message: str,
+        data: dict[str, Any],
+        step_id: str | None = None,
+    ) -> WorkPlanEvent:
+        event = WorkPlanEvent(
+            plan_id=plan.id,
+            step_id=step_id,
+            event_type=event_type,
+            severity=severity,
+            message=message[:4000],
+            data_json=data,
+        )
+        session.add(event)
+        return event
+
+    @staticmethod
+    def _event_payload(event: WorkPlanEvent) -> dict[str, Any]:
+        return {
+            "id": event.id,
+            "plan_id": event.plan_id,
+            "step_id": event.step_id,
+            "event_type": event.event_type,
+            "severity": event.severity,
+            "message": event.message,
+            "data": event.data_json or {},
+            "created_at": event.created_at.isoformat(),
+            "acknowledged_at": (
+                event.acknowledged_at.isoformat()
+                if event.acknowledged_at
+                else None
+            ),
+        }
+
     def _start_execution(self, plan_id: str, *, event: str) -> str:
         now = datetime.now(timezone.utc)
         with self.database.session() as session:
