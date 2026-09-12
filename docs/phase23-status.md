@@ -1,6 +1,6 @@
 # Phase 23 — Durable background work-plan runner
 
-Status: implemented on the Phase 23 verification branch; full CI and Windows artifact verification pending.
+Status: complete, fully verified, and merged to main.
 
 ## Objective
 
@@ -90,4 +90,39 @@ If the current tool is a Phase 11–16 `propose_*` tool, its persistent proposal
 - all tool attempts continue through ToolRegistry and persistent ToolCall/AuditLog records;
 - worker startup recovery acts only on persisted plan/step status.
 
-Final test count, CI run, Engine 0.23.0 packaged worker smoke, Windows installer artifact, PR and merge SHA will be recorded after verification.
+## Verification and release evidence
+
+Feature PR:
+
+- PR #41 — Phase 23 — Durable background work plan runner
+- feature head: `49509ad5747832d2534f5b5904f484983253bb02`
+- feature merge SHA: `677acc4f3e67d6778085c988622b1a9024e3e7b2`
+
+Final CI:
+
+- Run #116 / ID `34694496588`: success
+- desktop TypeScript typecheck: passed
+- desktop Vite production build: passed
+- Ruff: passed
+- Engine pytest: **156 passed, 59 warnings in 178.94s**
+- Windows packaged sidecar build: passed
+- packaged Engine smoke: passed
+- packaged Engine version: **0.23.0**
+- packaged Work Plan Worker smoke: **running=True; processed=0**
+- Tauri Windows native build: passed
+- NSIS installer: `DeskAI Work_0.1.0_x64-setup.exe`
+- MSI installer: `DeskAI Work_0.1.0_x64_en-US.msi`
+
+Windows artifact:
+
+- name: `DeskAI-Work-Windows`
+- Artifact ID: **10298477576**
+- size: **394,518,850 bytes**
+- SHA-256: `7f5b1c53bf0b7ac5d618db19bf0c81906da2ff13cdc1363246472c4031222b23`
+- created: 2026-09-12T12:58:27Z
+- expires: 2026-12-11T12:44:26Z
+- artifact was not expired at verification time.
+
+## Final Phase 23 state
+
+Phase 23 is now the verified mainline execution model for persistent multi-step plans. Long plans no longer need to remain inside one HTTP request: they enter a durable queue, are claimed by WorkPlanWorker, persist completed checkpoints, stop at original human confirmation gates, recover only from provably safe restart states, and never replay an ambiguous running tool automatically.
