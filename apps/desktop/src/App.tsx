@@ -20,6 +20,7 @@ import {
   getDesktopSettings,
   getIndexQueueSummary,
   getAgentStatus,
+  getWorkPlanWorkerStatus,
   getKnowledgeStatus,
   getMemoryStatus,
   getOpenAIProviderStatus,
@@ -96,6 +97,7 @@ import {
   type Workspace,
   type WorkspaceRoot,
   type WorkPlanRecord,
+  type WorkPlanWorkerStatus,
 } from "./lib/engine";
 
 type EngineState =
@@ -149,6 +151,7 @@ export default function App() {
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [workPlanWorkerStatus, setWorkPlanWorkerStatus] = useState<WorkPlanWorkerStatus | null>(null);
   const [activity, setActivity] = useState<ActivityRecord[]>([]);
   const [recoveryEntries, setRecoveryEntries] = useState<RecoveryEntry[]>([]);
   const [taskRequest, setTaskRequest] = useState("");
@@ -218,6 +221,7 @@ export default function App() {
       setMemoryStatus(null);
       setTasks([]);
       setAgentStatus(null);
+      setWorkPlanWorkerStatus(null);
       setActivity([]);
       setRecoveryEntries([]);
       setTaskDetail(null);
@@ -243,6 +247,17 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
+    if (page !== "tasks" || engine.kind !== "online" || !taskDetail?.id) return;
+    const taskId = taskDetail.id;
+    const timer = window.setInterval(() => {
+      getTask(taskId)
+        .then((next) => setTaskDetail(next))
+        .catch(() => undefined);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [engine.kind, page, taskDetail?.id]);
+
+  useEffect(() => {
     if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory", "tasks", "recovery", "activity"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
@@ -255,10 +270,11 @@ export default function App() {
         getMemoryStatus(activeWorkspaceId),
         listTasks(activeWorkspaceId),
         getAgentStatus(activeWorkspaceId),
+        getWorkPlanWorkerStatus(),
         listActivity(activeWorkspaceId),
         listRecovery(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity, nextRecovery]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextWorkPlanWorkerStatus, nextActivity, nextRecovery]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
@@ -268,6 +284,7 @@ export default function App() {
           setMemoryStatus(nextMemoryStatus);
           setTasks(nextTasks);
           setAgentStatus(nextAgentStatus);
+          setWorkPlanWorkerStatus(nextWorkPlanWorkerStatus);
           setActivity(nextActivity);
           setRecoveryEntries(nextRecovery);
         })
@@ -287,7 +304,7 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity, nextRecovery] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextWorkPlanWorkerStatus, nextActivity, nextRecovery] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
@@ -299,6 +316,7 @@ export default function App() {
       getMemoryStatus(workspaceId),
       listTasks(workspaceId),
       getAgentStatus(workspaceId),
+      getWorkPlanWorkerStatus(),
       listActivity(workspaceId),
       listRecovery(workspaceId),
     ]);
@@ -313,6 +331,7 @@ export default function App() {
     setMemoryStatus(nextMemoryStatus);
     setTasks(nextTasks);
     setAgentStatus(nextAgentStatus);
+    setWorkPlanWorkerStatus(nextWorkPlanWorkerStatus);
     setActivity(nextActivity);
     setRecoveryEntries(nextRecovery);
     setActiveConversationId((current) => {
