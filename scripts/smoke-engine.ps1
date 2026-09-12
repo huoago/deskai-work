@@ -2,7 +2,13 @@ param([int]$Port = 18765)
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Binary = Join-Path $RepoRoot "apps\desktop\src-tauri\binaries\deskai-engine-x86_64-pc-windows-msvc.exe"
+$VersionFile = Join-Path $RepoRoot "apps\engine\app\__init__.py"
 if (!(Test-Path $Binary)) { throw "Missing engine sidecar: $Binary" }
+if (!(Test-Path $VersionFile)) { throw "Missing Engine version source: $VersionFile" }
+$VersionSource = Get-Content $VersionFile -Raw
+$VersionMatch = [regex]::Match($VersionSource, '__version__\s*=\s*"([^"]+)"')
+if (!$VersionMatch.Success) { throw "Unable to read Engine version from $VersionFile" }
+$ExpectedVersion = $VersionMatch.Groups[1].Value
 
 $Token = [Guid]::NewGuid().ToString()
 $TempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() }
@@ -79,10 +85,12 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.24.0") {
+  if ([string]$health.version -ne $ExpectedVersion) {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.24.0, got $($health.version)."
+    throw "Expected packaged engine version $ExpectedVersion, got $($health.version)."
   }
+
+  Write-Host "Packaged Engine version matches source: $ExpectedVersion"
 
   try {
     $artifacts = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/artifacts" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
