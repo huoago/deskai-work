@@ -1347,6 +1347,7 @@ export default function App() {
             setRequest={setTaskRequest}
             disabled={!online || busy}
             onCreate={onCreateTask}
+            onCreatePlan={onCreatePlannedTask}
             onSelect={onSelectTask}
             onRetry={onRetryTask}
             onProcess={onProcessAgentQueue}
@@ -1368,6 +1369,10 @@ export default function App() {
             onConfirmRecycleBatch={onConfirmRecycleBatch}
             onRejectRecycleBatch={onRejectRecycleBatch}
             onRestoreRecycleBatch={onRestoreRecycleBatch}
+            onStartWorkPlan={onStartWorkPlan}
+            onResumeWorkPlan={onResumeWorkPlan}
+            onRetryWorkPlan={onRetryWorkPlan}
+            onCancelWorkPlan={onCancelWorkPlan}
           />
         ) : page === "recovery" ? (
           <RecoveryPage
@@ -1459,7 +1464,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 21 · AI + 文件事务 + 恢复证据导出</span>
+          <span className="phase-chip">Phase 22 · 持久化多步骤工作计划</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
