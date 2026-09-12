@@ -145,6 +145,9 @@ The Task plan panel now shows:
 ## Safety invariants
 
 - Pause and timeout do not force-kill an executing tool;
+- Worker ownership uses a conditional `queued → running` claim; a concurrent Pause cannot be silently overwritten by a stale Worker selection;
+- Step execution, Approve, and Skip use conditional state transitions so concurrent human control cannot resurrect cancelled/skipped work;
+- skipping an unrelated pending step never releases another step's `awaiting_step_approval` gate;
 - Skip cannot bypass proposal_gate or active dependencies;
 - risk approval can only add a human gate and cannot reduce PermissionGate restrictions;
 - approval does not replace source edit / organization / recycle confirmation;
