@@ -1702,10 +1702,20 @@ class WorkPlanService:
             task = session.get(Task, plan.task_id)
             plan.status = "queued"
             plan.error_message = None
+            plan.pause_reason = None
+            plan.paused_at = None
             if task is not None:
                 task.status = "queued"
                 task.error_message = None
                 task.completed_at = None
+            self._event(
+                session,
+                plan,
+                event_type="queued",
+                severity="info",
+                message=result,
+                data={},
+            )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
@@ -1784,6 +1794,7 @@ class WorkPlanService:
             plan.status = "completed"
             plan.completed_at = now
             plan.error_message = None
+            plan.pause_reason = None
             task = session.get(Task, plan.task_id)
             if task is not None:
                 task.status = "completed"
@@ -1795,6 +1806,17 @@ class WorkPlanService:
             if run is not None:
                 run.status = "completed"
                 run.completed_at = now
+            self._event(
+                session,
+                plan,
+                event_type="completed",
+                severity="info",
+                message="Work plan completed",
+                data={
+                    "auto_steps_used": plan.auto_steps_used,
+                    "runtime_seconds_used": plan.runtime_seconds_used,
+                },
+            )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
@@ -1823,24 +1845,54 @@ class WorkPlanService:
             step.status = "failed"
             step.error_message = message
             step.completed_at = now
-            plan.status = "failed"
-            plan.error_message = message
             task = session.get(Task, plan.task_id)
-            if task is not None:
-                task.status = "failed"
-                task.error_message = message
-                task.completed_at = now
             run = session.get(AgentRun, run_id)
-            if run is not None:
-                run.status = "failed"
-                run.completed_at = now
+
+            if plan.failure_policy == "pause":
+                plan.status = "paused"
+                plan.paused_at = now
+                plan.pause_reason = (
+                    f"Step {step.position} failed and the plan failure policy is pause"
+                )
+                plan.error_message = message
+                if task is not None:
+                    task.status = "blocked"
+                    task.error_message = message
+                if run is not None:
+                    run.status = "paused"
+                    run.completed_at = now
+            else:
+                plan.status = "failed"
+                plan.error_message = message
+                if task is not None:
+                    task.status = "failed"
+                    task.error_message = message
+                    task.completed_at = now
+                if run is not None:
+                    run.status = "failed"
+                    run.completed_at = now
+
+            self._event(
+                session,
+                plan,
+                step_id=step.id,
+                event_type="step_failed",
+                severity="action",
+                message=f"Step {step.position} failed: {message}",
+                data={
+                    "failure_policy": plan.failure_policy,
+                    "tool_name": step.tool_name,
+                },
+            )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
                     agent_run_id=run_id,
                     action="work_plan_step_failed",
                     target=step_id,
-                    result=message,
+                    result=(
+                        f"{message}; failure_policy={plan.failure_policy}"
+                    )[:4000],
                     risk_level=step.risk_level,
                 )
             )
