@@ -1568,6 +1568,12 @@ export default function App() {
             onResumeWorkPlan={onResumeWorkPlan}
             onRetryWorkPlan={onRetryWorkPlan}
             onCancelWorkPlan={onCancelWorkPlan}
+            onPauseWorkPlan={onPauseWorkPlan}
+            onContinueWorkPlan={onContinuePausedWorkPlan}
+            onApproveWorkPlanStep={onApproveWorkPlanStep}
+            onSkipWorkPlanStep={onSkipWorkPlanStep}
+            onConfigureWorkPlan={onConfigureWorkPlan}
+            onAcknowledgeWorkPlanEvent={onAcknowledgeWorkPlanEvent}
           />
         ) : page === "recovery" ? (
           <RecoveryPage
@@ -2091,7 +2097,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, request, setRequest, disabled, onCreate, onCreatePlan, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch, onStartWorkPlan, onResumeWorkPlan, onRetryWorkPlan, onCancelWorkPlan }: {
+function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, request, setRequest, disabled, onCreate, onCreatePlan, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch, onStartWorkPlan, onResumeWorkPlan, onRetryWorkPlan, onCancelWorkPlan, onPauseWorkPlan, onContinueWorkPlan, onApproveWorkPlanStep, onSkipWorkPlanStep, onConfigureWorkPlan, onAcknowledgeWorkPlanEvent }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -2127,10 +2133,16 @@ function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, req
   onResumeWorkPlan: (plan: WorkPlanRecord) => void;
   onRetryWorkPlan: (plan: WorkPlanRecord) => void;
   onCancelWorkPlan: (plan: WorkPlanRecord) => void;
+  onPauseWorkPlan: (plan: WorkPlanRecord) => void;
+  onContinueWorkPlan: (plan: WorkPlanRecord) => void;
+  onApproveWorkPlanStep: (plan: WorkPlanRecord, step: WorkPlanStepRecord) => void;
+  onSkipWorkPlanStep: (plan: WorkPlanRecord, step: WorkPlanStepRecord) => void;
+  onConfigureWorkPlan: (plan: WorkPlanRecord) => void;
+  onAcknowledgeWorkPlanEvent: (plan: WorkPlanRecord, event: WorkPlanEventRecord) => void;
 }) {
   const pending = tasks.filter((item) => ["pending", "planning", "planned", "queued"].includes(item.status)).length;
   const running = tasks.filter((item) => ["running", "cancelling"].includes(item.status)).length;
-  const waitingConfirmation = tasks.filter((item) => item.status === "awaiting_confirmation").length;
+  const waitingConfirmation = tasks.filter((item) => ["awaiting_confirmation", "awaiting_step_approval"].includes(item.status)).length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
   const edits = detail?.file_edits ?? [];
@@ -2228,6 +2240,12 @@ function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, req
                   onResume={onResumeWorkPlan}
                   onRetry={onRetryWorkPlan}
                   onCancel={onCancelWorkPlan}
+                  onPause={onPauseWorkPlan}
+                  onContinue={onContinueWorkPlan}
+                  onApproveStep={onApproveWorkPlanStep}
+                  onSkipStep={onSkipWorkPlanStep}
+                  onConfigure={onConfigureWorkPlan}
+                  onAcknowledgeEvent={onAcknowledgeWorkPlanEvent}
                 />
               ))}
 
