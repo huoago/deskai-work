@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.api.settings import DEFAULTS
 from app.database.models import (
@@ -208,23 +208,48 @@ class WorkPlanService:
                         "status": state,
                         "human_confirmation_status": state,
                     }
-                plan_row.status = "queued"
-                plan_row.error_message = None
+
+                pause_after_timeout = bool(step.timeout_exceeded)
+                if pause_after_timeout:
+                    timeout_reason = (
+                        f"Step {step.position} exceeded the supervised timeout "
+                        f"of {plan_row.step_timeout_seconds} seconds while creating "
+                        "the protected file proposal. Confirmation is complete, but "
+                        "later plan steps remain paused for human review."
+                    )
+                    plan_row.status = "paused"
+                    plan_row.paused_at = now
+                    plan_row.pause_reason = timeout_reason
+                    plan_row.error_message = timeout_reason
+                else:
+                    plan_row.status = "queued"
+                    plan_row.paused_at = None
+                    plan_row.pause_reason = None
+                    plan_row.error_message = None
+
                 if task is not None:
-                    task.status = "queued"
-                    task.error_message = None
+                    task.status = "paused" if pause_after_timeout else "queued"
+                    task.error_message = (
+                        plan_row.pause_reason if pause_after_timeout else None
+                    )
                     task.completed_at = None
                 self._event(
                     session,
                     plan_row,
                     step_id=step.id,
                     event_type="file_confirmation_observed",
-                    severity="info",
-                    message=f"Original file confirmation completed with status {state}",
+                    severity="action" if pause_after_timeout else "info",
+                    message=(
+                        plan_row.pause_reason
+                        if pause_after_timeout
+                        else f"Original file confirmation completed with status {state}"
+                    ),
                     data={
                         "entity_type": step.external_entity_type,
                         "entity_id": step.external_entity_id,
                         "status": state,
+                        "timeout_exceeded": pause_after_timeout,
+                        "requeued": not pause_after_timeout,
                     },
                 )
                 session.add(
@@ -235,7 +260,8 @@ class WorkPlanService:
                         result=(
                             f"tool={step.tool_name}; entity={step.external_entity_type}; "
                             f"entity_id={step.external_entity_id}; status={state}; "
-                            "requeued=true"
+                            f"requeued={str(not pause_after_timeout).lower()}; "
+                            f"paused_for_timeout={str(pause_after_timeout).lower()}"
                         ),
                         risk_level=step.risk_level,
                     )
@@ -575,6 +601,7 @@ class WorkPlanService:
             if step.execution_mode != "auto" or step.external_entity_id:
                 raise ValueError("File proposal / confirmation-gate steps cannot be skipped")
 
+            expected_status = step.status
             later = list(
                 session.scalars(
                     select(WorkPlanStep).where(
@@ -595,10 +622,26 @@ class WorkPlanService:
                     + ",".join(str(value) for value in dependents)
                 )
 
-            step.status = "skipped"
-            step.skipped_at = now
-            step.completed_at = now
-            step.skip_reason = clean_reason
+            claimed = session.execute(
+                update(WorkPlanStep)
+                .where(
+                    WorkPlanStep.id == step_id,
+                    WorkPlanStep.plan_id == plan_id,
+                    WorkPlanStep.status == expected_status,
+                )
+                .values(
+                    status="skipped",
+                    skipped_at=now,
+                    completed_at=now,
+                    skip_reason=clean_reason,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                raise ValueError(
+                    "Step changed state before the skip could be applied; reload the plan"
+                )
+            session.refresh(step)
             if plan.status == "awaiting_step_approval":
                 plan.status = "queued"
                 task = session.get(Task, plan.task_id)
@@ -1137,11 +1180,28 @@ class WorkPlanService:
                 raise RuntimeError("Work plan step disappeared")
             if plan.status in {"cancelling", "pausing"}:
                 stop_before_step = plan.status
+            elif step.status != "pending":
+                stop_before_step = "step_state_changed"
             else:
-                step.status = "running"
-                step.started_at = now
-                step.timeout_exceeded = False
-                plan.auto_steps_used += 1
+                claimed = session.execute(
+                    update(WorkPlanStep)
+                    .where(
+                        WorkPlanStep.id == step_id,
+                        WorkPlanStep.plan_id == plan_id,
+                        WorkPlanStep.status == "pending",
+                    )
+                    .values(
+                        status="running",
+                        started_at=now,
+                        timeout_exceeded=False,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if claimed.rowcount != 1:
+                    stop_before_step = "step_state_changed"
+                else:
+                    session.refresh(step)
+                    plan.auto_steps_used += 1
             task_id = plan.task_id
             workspace_id = plan.workspace_id
             tool_name = step.tool_name
@@ -1861,6 +1921,7 @@ class WorkPlanService:
                 if step.status in {
                     "pending",
                     "awaiting_confirmation",
+                    "awaiting_step_approval",
                     "failed",
                     "interrupted",
                 }:
