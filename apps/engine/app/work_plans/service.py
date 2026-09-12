@@ -2045,8 +2045,10 @@ class WorkPlanService:
         )
         if not steps:
             return 0.08
-        completed = sum(1 for item in steps if item.status == "completed")
-        return min(0.95, 0.1 + (completed / len(steps)) * 0.85)
+        resolved = sum(
+            1 for item in steps if item.status in {"completed", "skipped"}
+        )
+        return min(0.95, 0.1 + (resolved / len(steps)) * 0.85)
 
     @staticmethod
     def _payload(session, plan: WorkPlan) -> dict[str, Any]:
@@ -2057,7 +2059,52 @@ class WorkPlanService:
                 .order_by(WorkPlanStep.position)
             ).all()
         )
-        completed = sum(1 for step in steps if step.status == "completed")
+        resolved = [step for step in steps if step.status in {"completed", "skipped"}]
+        completed = [step for step in steps if step.status == "completed"]
+        skipped = [step for step in steps if step.status == "skipped"]
+        remaining = [
+            step
+            for step in steps
+            if step.status not in {"completed", "skipped", "cancelled"}
+        ]
+        durations = [
+            float(step.duration_seconds)
+            for step in completed
+            if step.duration_seconds is not None and step.duration_seconds >= 0
+        ]
+        average_duration = (
+            sum(durations) / len(durations)
+            if durations
+            else None
+        )
+        estimated_remaining = (
+            average_duration * len(remaining)
+            if average_duration is not None
+            else None
+        )
+        unread_notifications = int(
+            session.scalar(
+                select(func.count(WorkPlanEvent.id)).where(
+                    WorkPlanEvent.plan_id == plan.id,
+                    WorkPlanEvent.acknowledged_at.is_(None),
+                    WorkPlanEvent.severity.in_(("warning", "action")),
+                )
+            )
+            or 0
+        )
+        latest_events = list(
+            session.scalars(
+                select(WorkPlanEvent)
+                .where(WorkPlanEvent.plan_id == plan.id)
+                .order_by(WorkPlanEvent.created_at.desc(), WorkPlanEvent.id.desc())
+                .limit(12)
+            ).all()
+        )
+        retryable = any(
+            step.status in {"failed", "interrupted"}
+            and not step.external_entity_id
+            for step in steps
+        )
         return {
             "id": plan.id,
             "task_id": plan.task_id,
@@ -2067,16 +2114,51 @@ class WorkPlanService:
             "limitations": list(plan.limitations_json or []),
             "status": plan.status,
             "error_message": plan.error_message,
+            "pause_reason": plan.pause_reason,
             "created_at": plan.created_at.isoformat(),
             "started_at": plan.started_at.isoformat() if plan.started_at else None,
             "completed_at": plan.completed_at.isoformat() if plan.completed_at else None,
             "cancelled_at": plan.cancelled_at.isoformat() if plan.cancelled_at else None,
-            "progress": completed / len(steps) if steps else 0.0,
+            "paused_at": plan.paused_at.isoformat() if plan.paused_at else None,
+            "progress": len(resolved) / len(steps) if steps else 0.0,
             "requires_confirmation": plan.status == "awaiting_confirmation",
+            "requires_step_approval": plan.status == "awaiting_step_approval",
             "can_start": plan.status == "ready",
             "can_resume": plan.status == "awaiting_confirmation",
-            "can_retry": plan.status in {"failed", "paused"},
+            "can_pause": plan.status in {"queued", "running"},
+            "can_continue": plan.status == "paused" and not retryable,
+            "can_retry": plan.status in {"failed", "paused"} and retryable,
             "can_cancel": plan.status not in {"completed", "cancelled"},
+            "supervision": {
+                "max_auto_steps": plan.max_auto_steps,
+                "auto_steps_used": plan.auto_steps_used,
+                "auto_steps_remaining": max(
+                    0,
+                    plan.max_auto_steps - plan.auto_steps_used,
+                ),
+                "runtime_budget_seconds": plan.runtime_budget_seconds,
+                "runtime_seconds_used": plan.runtime_seconds_used,
+                "runtime_seconds_remaining": max(
+                    0.0,
+                    plan.runtime_budget_seconds - plan.runtime_seconds_used,
+                ),
+                "step_timeout_seconds": plan.step_timeout_seconds,
+                "failure_policy": plan.failure_policy,
+                "approval_risk_threshold": plan.approval_risk_threshold,
+            },
+            "estimate": {
+                "total_steps": len(steps),
+                "completed_steps": len(completed),
+                "skipped_steps": len(skipped),
+                "remaining_steps": len(remaining),
+                "average_completed_step_seconds": average_duration,
+                "estimated_remaining_seconds": estimated_remaining,
+            },
+            "unread_notifications": unread_notifications,
+            "latest_events": [
+                WorkPlanService._event_payload(item)
+                for item in latest_events
+            ],
             "steps": [
                 {
                     "id": step.id,
@@ -2095,6 +2177,19 @@ class WorkPlanService:
                     "external_entity_type": step.external_entity_type,
                     "external_entity_id": step.external_entity_id,
                     "error_message": step.error_message,
+                    "approved_at": (
+                        step.approved_at.isoformat()
+                        if step.approved_at
+                        else None
+                    ),
+                    "skipped_at": (
+                        step.skipped_at.isoformat()
+                        if step.skipped_at
+                        else None
+                    ),
+                    "skip_reason": step.skip_reason,
+                    "duration_seconds": step.duration_seconds,
+                    "timeout_exceeded": bool(step.timeout_exceeded),
                     "created_at": step.created_at.isoformat(),
                     "started_at": step.started_at.isoformat() if step.started_at else None,
                     "completed_at": step.completed_at.isoformat() if step.completed_at else None,
@@ -2102,3 +2197,4 @@ class WorkPlanService:
                 for step in steps
             ],
         }
+
