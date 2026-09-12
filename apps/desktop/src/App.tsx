@@ -10,6 +10,7 @@ import {
   confirmRecycleProposal,
   confirmRecycleBatch,
   confirmRecoveryReconciliation,
+  exportRecoveryEvidencePackage,
   createMemory,
   createTask,
   createWorkspace,
@@ -80,6 +81,7 @@ import {
   type ParsedPreview,
   type ParserStatus,
   type RecoveryEntry,
+  type RecoveryEvidencePackage,
   type RecoveryReconciliationProposal,
   type RecoverySnapshot,
   type SearchHit,
@@ -1039,6 +1041,25 @@ export default function App() {
     }
   }
 
+  async function onExportRecoveryEvidence(
+    entry: RecoveryEntry,
+  ): Promise<RecoveryEvidencePackage> {
+    setBusy(true);
+    setNotice("");
+    try {
+      const evidence = await exportRecoveryEvidencePackage(entry.entity_type, entry.id);
+      setNotice(
+        `恢复证据包已生成：${evidence.artifact.filename} · SHA-256 ${evidence.artifact.sha256.slice(0, 16)}…；未复制或修改 Workspace 文件内容。`,
+      );
+      return evidence;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "恢复证据包生成失败");
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1271,6 +1292,7 @@ export default function App() {
             onProposeReconciliation={onProposeRecoveryReconciliation}
             onConfirmReconciliation={onConfirmRecoveryReconciliation}
             onRejectReconciliation={onRejectRecoveryReconciliation}
+            onExportEvidence={onExportRecoveryEvidence}
             onOpenTask={(taskId) => {
               setPage("tasks");
               void onSelectTask(taskId);
@@ -1351,7 +1373,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 20 · AI + 文件事务 + 受控恢复解冻</span>
+          <span className="phase-chip">Phase 21 · AI + 文件事务 + 恢复证据导出</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -2299,6 +2321,7 @@ function RecoveryPage({
   onProposeReconciliation,
   onConfirmReconciliation,
   onRejectReconciliation,
+  onExportEvidence,
   onOpenTask,
 }: {
   entries: RecoveryEntry[];
@@ -2308,6 +2331,7 @@ function RecoveryPage({
   onProposeReconciliation: (entry: RecoveryEntry) => Promise<RecoveryReconciliationProposal>;
   onConfirmReconciliation: (proposal: RecoveryReconciliationProposal) => Promise<RecoveryReconciliationProposal>;
   onRejectReconciliation: (proposal: RecoveryReconciliationProposal) => Promise<RecoveryReconciliationProposal>;
+  onExportEvidence: (entry: RecoveryEntry) => Promise<RecoveryEvidencePackage>;
   onOpenTask: (taskId: string) => void;
 }) {
   const [filter, setFilter] = useState<"recoverable" | "attention" | "history" | "all">("recoverable");
@@ -2317,6 +2341,9 @@ function RecoveryPage({
   const [reconciliations, setReconciliations] = useState<Record<string, RecoveryReconciliationProposal>>({});
   const [reconciliationErrors, setReconciliationErrors] = useState<Record<string, string>>({});
   const [reconciliationLoading, setReconciliationLoading] = useState<string | null>(null);
+  const [evidencePackages, setEvidencePackages] = useState<Record<string, RecoveryEvidencePackage>>({});
+  const [evidenceErrors, setEvidenceErrors] = useState<Record<string, string>>({});
+  const [evidenceLoading, setEvidenceLoading] = useState<string | null>(null);
 
   async function refreshSnapshot(entry: RecoveryEntry) {
     const key = recoverySnapshotKey(entry);
@@ -2400,6 +2427,23 @@ function RecoveryPage({
     }
   }
 
+  async function exportEvidence(entry: RecoveryEntry) {
+    const key = recoverySnapshotKey(entry);
+    setEvidenceLoading(key);
+    setEvidenceErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      const result = await onExportEvidence(entry);
+      setEvidencePackages((current) => ({ ...current, [key]: result }));
+    } catch (error) {
+      setEvidenceErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "恢复证据包生成失败",
+      }));
+    } finally {
+      setEvidenceLoading((current) => (current === key ? null : current));
+    }
+  }
+
   const recoverable = entries.filter((item) => item.action !== null);
   const attention = entries.filter((item) => item.recovery_required);
   const history = entries.filter((item) => item.action === null && !item.recovery_required);
@@ -2425,7 +2469,7 @@ function RecoveryPage({
         <div className="panel-head recovery-head">
           <div>
             <h3>统一恢复中心</h3>
-            <p className="muted small">集中查看 Phase 11–19 的文件事务。Phase 20 只在最新恢复快照证明磁盘完整处于 applied/recycled 且历史 rollback/restore 所需证据齐全时，允许生成状态核对提案；必须二次确认且只修正元数据，不修改用户文件。</p>
+            <p className="muted small">集中查看 Phase 11–21 的文件事务与恢复证据。Phase 20 只在最新快照证明 applied/recycled 且历史动作证据齐全时允许受控状态核对；Phase 21 可导出只读事故证据 ZIP，不包含用户文件内容，也不修改任何恢复状态。</p>
           </div>
           <div className="recovery-filters">
             {([
@@ -2474,6 +2518,27 @@ function RecoveryPage({
                 {entry.filenames.length > 6 && <span>+{entry.filenames.length - 6}</span>}
               </div>
               {entry.paths.slice(0, 2).map((path) => <code className="recovery-path" key={path}>{path}</code>)}
+              <div className="recovery-snapshot-actions">
+                <button
+                  className="secondary"
+                  disabled={disabled || evidenceLoading === recoverySnapshotKey(entry)}
+                  onClick={() => void exportEvidence(entry)}
+                >
+                  {evidenceLoading === recoverySnapshotKey(entry) ? "生成中…" : "导出恢复证据包"}
+                </button>
+                <span className="muted small">Phase 21：仅打包事务元数据、诊断、快照、SHA、核对历史和审计；不包含 Workspace/备份/隔离副本文件内容。</span>
+              </div>
+              {evidenceErrors[recoverySnapshotKey(entry)] && (
+                <div className="provider-error">{evidenceErrors[recoverySnapshotKey(entry)]}</div>
+              )}
+              {evidencePackages[recoverySnapshotKey(entry)] && (
+                <div className="recovery-evidence">
+                  <strong>证据包已生成</strong>
+                  <code>{evidencePackages[recoverySnapshotKey(entry)].artifact.filename}</code>
+                  <code className="recovery-path">{evidencePackages[recoverySnapshotKey(entry)].artifact.path}</code>
+                  <span className="muted small">ZIP SHA-256 {evidencePackages[recoverySnapshotKey(entry)].artifact.sha256}</span>
+                </div>
+              )}
               {entry.error_message && <div className="provider-error">{entry.error_message}</div>}
               {entry.recovery_required && (
                 <>
@@ -3041,7 +3106,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 20</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 21</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -3071,6 +3136,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 19 恢复快照只在人工点击时读取事务已知路径；符号链接不会跟随，检测结果不写数据库、不解除冻结</p>
           <p><b>✓</b> Phase 20 仅允许 verified applied/recycled 快照生成元数据核对提案；确认时必须重新匹配完整快照指纹</p>
           <p><b>✓</b> Phase 20 解冻只修正事务/File 元数据，绝不修改用户文件；文件动作仍只能走原 rollback/restore 安全 API</p>
+          <p><b>✓</b> Phase 21 证据包只写入 DeskAI generated 沙箱，包含元数据/诊断/快照/SHA/审计，不嵌入 Workspace、备份或隔离副本文件内容</p>
+          <p><b>✓</b> Phase 21 不改变 recovery/reconciliation 状态，不执行 rollback/restore，不提供 Agent 导出或任意输出路径</p>
         </div>
       </article>
     </section>
