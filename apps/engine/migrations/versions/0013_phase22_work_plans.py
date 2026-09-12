@@ -84,6 +84,7 @@ def upgrade() -> None:
             sa.Column("execution_mode", sa.String(length=32), nullable=False),
             sa.Column("status", sa.String(length=32), nullable=False),
             sa.Column("result_summary", sa.Text(), nullable=True),
+            sa.Column("result_json", sa.JSON(), nullable=True),
             sa.Column("tool_call_id", sa.String(length=36), nullable=True),
             sa.Column("external_entity_type", sa.String(length=64), nullable=True),
             sa.Column("external_entity_id", sa.String(length=36), nullable=True),
