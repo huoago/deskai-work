@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -419,7 +418,7 @@ class RecoverySnapshotService:
         try:
             link_component = RecoverySnapshotService._link_component(path)
             if link_component is not None:
-                base["exists"] = os.path.lexists(path)
+                base["exists"] = link_component == str(path)
                 base["is_symlink"] = True
                 base["error"] = f"link_component_not_followed:{link_component}"
                 return base
