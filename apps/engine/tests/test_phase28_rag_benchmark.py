@@ -40,7 +40,9 @@ def test_phase28_benchmark_is_exactly_100_questions_and_has_required_coverage():
 
 def test_phase28_scoring_math_is_deterministic():
     _, cases = build_engineering_benchmark_v1()
-    sample = cases[:2]
+    # Pick cases from different authoritative files so a fixed first-file hit
+    # is relevant to exactly one of the two questions.
+    sample = [cases[0], cases[5]]
 
     def fake_search(question: str, limit: int) -> list[dict]:
         del question, limit
@@ -74,15 +76,16 @@ def test_phase28_local_hash_end_to_end_retrieval_gate(client, tmp_path: Path):
         return response.json()["results"]
 
     report = evaluate_retrieval(cases, search)
+    diagnostics = report.as_dict()
 
     # The deterministic compatibility provider is the CI regression floor, not
     # the target semantic quality. BGE-M3/OpenAI runs use the same benchmark.
-    assert report.total_cases == 100
-    assert report.recall_at_1 >= 0.90
-    assert report.recall_at_5 >= 0.98
-    assert report.recall_at_10 >= 0.98
-    assert report.mrr >= 0.92
-    assert report.evidence_accuracy >= 0.98
-    assert report.citation_accuracy >= 0.98
+    assert report.total_cases == 100, diagnostics
+    assert report.recall_at_1 >= 0.90, diagnostics
+    assert report.recall_at_5 >= 0.98, diagnostics
+    assert report.recall_at_10 >= 0.98, diagnostics
+    assert report.mrr >= 0.92, diagnostics
+    assert report.evidence_accuracy >= 0.98, diagnostics
+    assert report.citation_accuracy >= 0.98, diagnostics
     for category in ("quantity", "pressure", "date", "role", "status"):
-        assert report.category_recall_at_5[category] >= 0.95
+        assert report.category_recall_at_5[category] >= 0.95, diagnostics
