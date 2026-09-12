@@ -13,6 +13,7 @@ import {
   exportRecoveryEvidencePackage,
   createMemory,
   createTask,
+  draftWorkPlan,
   createWorkspace,
   deactivateMemory,
   deleteOpenAIApiKey,
@@ -50,10 +51,13 @@ import {
   rejectRecycleBatch,
   retryMemoryQueue,
   retryTask,
+  retryWorkPlan,
+  resumeWorkPlan,
   rollbackSourceFileEdit,
   rollbackSourceFileEditBatch,
   rollbackFileOrganization,
   rollbackFileOrganizationBatch,
+  startWorkPlan,
   restoreRecycledFile,
   restoreRecycleBatch,
   revokeWorkspaceRoot,
@@ -65,6 +69,7 @@ import {
   updateDesktopSettings,
   updateMemory,
   updateWorkspaceRoot,
+  cancelWorkPlan,
   type ActivityRecord,
   type AgentStatus,
   type ChatMessage,
@@ -90,6 +95,7 @@ import {
   type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
+  type WorkPlanRecord,
 } from "./lib/engine";
 
 type EngineState =
@@ -639,6 +645,24 @@ export default function App() {
     }
   }
 
+  async function onCreatePlannedTask() {
+    if (!activeWorkspaceId || !taskRequest.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const task = await createTask(activeWorkspaceId, taskRequest.trim(), undefined, "plan");
+      await draftWorkPlan(task.id);
+      setTaskRequest("");
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(task.id));
+      setNotice("多步骤工作计划已生成。请先审阅步骤，再点击“开始执行计划”。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "生成多步骤工作计划失败");
+      await refreshWorkspaceData().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function onSelectTask(taskId: string) {
     try {
       setTaskDetail(await getTask(taskId));
@@ -1060,6 +1084,68 @@ export default function App() {
     }
   }
 
+  async function onStartWorkPlan(plan: WorkPlanRecord) {
+    if (!window.confirm("开始执行这个多步骤计划吗？只读/分析/新建成果步骤会按依赖自动执行；任何现有文件变更只会生成原安全提案并暂停等待你的确认。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await startWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(result.status === "awaiting_confirmation" ? "计划已执行到人工确认门禁。请在下方审核对应文件提案，确认后再点击“继续计划”。" : result.status === "completed" ? "多步骤工作计划已完成。" : `计划状态：${result.status}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "启动工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onResumeWorkPlan(plan: WorkPlanRecord) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await resumeWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(result.status === "completed" ? "人工确认已被计划状态机识别，后续步骤执行完成。" : result.status === "blocked" ? "计划未绕过被拒绝或异常的文件动作，已安全阻断。" : `计划已继续，当前状态：${result.status}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "继续工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRetryWorkPlan(plan: WorkPlanRecord) {
+    if (!window.confirm("重试失败/中断的计划步骤吗？DeskAI 不会自动重试已经创建过文件提案的步骤。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await retryWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(result.status === "completed" ? "重试后计划已完成。" : `重试后状态：${result.status}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重试工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCancelWorkPlan(plan: WorkPlanRecord) {
+    if (!window.confirm("取消这个工作计划吗？尚未执行的步骤会停止；已经生成的文件提案不会被自动拒绝或删除，仍由你单独处理。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await cancelWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice("工作计划已取消；已有提案保持原状态，没有执行额外文件操作。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "取消工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
