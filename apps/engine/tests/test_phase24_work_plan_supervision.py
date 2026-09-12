@@ -165,6 +165,73 @@ def test_phase24_pause_during_running_tool_stops_at_step_boundary(client):
     assert client.get(f"/work-plans/{plan['id']}").json()["status"] == "completed"
 
 
+def test_phase24_pause_after_worker_claim_prevents_tool_start(client):
+    _, task = _workspace_task(client)
+    _wire_planner(client, [_calc_step("Claimed but paused", "11+31")])
+    plan = _draft(client, task["id"])
+    assert client.post(f"/work-plans/{plan['id']}/start").json()["status"] == "queued"
+
+    worker = client.app.state.work_plan_worker
+    claimed = worker._claim_next()
+    assert claimed == plan["id"]
+    assert client.get(f"/work-plans/{plan['id']}").json()["status"] == "running"
+
+    registry = client.app.state.tool_registry
+    original_execute = registry.execute
+    executed = {"count": 0}
+
+    def counted_execute(**kwargs):
+        executed["count"] += 1
+        return original_execute(**kwargs)
+
+    registry.execute = counted_execute
+    try:
+        pause_response = client.post(f"/work-plans/{plan['id']}/pause")
+        assert pause_response.status_code == 200
+        assert pause_response.json()["status"] == "pausing"
+
+        result = client.app.state.work_plan_service.execute_claimed(plan["id"])
+    finally:
+        registry.execute = original_execute
+
+    assert result["status"] == "paused"
+    assert result["steps"][0]["status"] == "pending"
+    assert executed["count"] == 0
+
+
+def test_phase24_skipping_other_pending_step_does_not_bypass_approval_gate(client):
+    _, task = _workspace_task(client)
+    _wire_planner(
+        client,
+        [
+            _calc_step("Approval-gated first", "2+2"),
+            _calc_step("Independent optional second", "3+3"),
+        ],
+    )
+    plan = _draft(client, task["id"])
+    assert client.patch(
+        f"/work-plans/{plan['id']}/supervision",
+        json={"approval_risk_threshold": 1},
+    ).status_code == 200
+
+    assert client.post(f"/work-plans/{plan['id']}/start").json()["status"] == "queued"
+    assert _process(client, limit=1)["processed"] == 1
+    waiting = client.get(f"/work-plans/{plan['id']}").json()
+    assert waiting["status"] == "awaiting_step_approval"
+    assert waiting["steps"][0]["status"] == "awaiting_step_approval"
+    assert waiting["steps"][1]["status"] == "pending"
+
+    skipped = client.post(
+        f"/work-plans/{plan['id']}/steps/{waiting['steps'][1]['id']}/skip",
+        json={"reason": "Skip an unrelated optional step"},
+    )
+    assert skipped.status_code == 200
+    payload = skipped.json()
+    assert payload["status"] == "awaiting_step_approval"
+    assert payload["steps"][0]["status"] == "awaiting_step_approval"
+    assert payload["steps"][1]["status"] == "skipped"
+
+
 def test_phase24_risk_threshold_requires_pre_step_human_approval(client):
     _, task = _workspace_task(client)
     _wire_planner(client, [_calc_step("Risk gated calculation", "2+3")])
