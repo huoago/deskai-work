@@ -558,6 +558,29 @@ export type RecoveryReconciliationProposal = {
   filesystem_mutation: false;
 };
 
+export type RecoveryEvidencePackage = {
+  artifact: GeneratedArtifactRecord;
+  manifest: {
+    format: string;
+    created_at: string;
+    entity_type: string;
+    transaction_id: string;
+    task_id: string;
+    workspace_id: string;
+    transaction_status: string;
+    recovery_required: boolean;
+    live_snapshot: boolean;
+    reconciliation_records: number;
+    audit_events: number;
+    user_file_content_included: false;
+    user_files_modified: false;
+    package_files: Record<string, { sha256: string; size: number }>;
+  };
+  read_only_evidence: true;
+  user_file_content_included: false;
+  user_files_modified: false;
+};
+
 export type RecoveryEntry = {
   id: string;
   entity_type:
@@ -969,6 +992,16 @@ export function rejectRecoveryReconciliation(
 ): Promise<RecoveryReconciliationProposal> {
   return request<RecoveryReconciliationProposal>(
     `/recovery-reconciliations/${encodeURIComponent(proposalId)}/reject`,
+    { method: "POST" },
+  );
+}
+
+export function exportRecoveryEvidencePackage(
+  entityType: string,
+  transactionId: string,
+): Promise<RecoveryEvidencePackage> {
+  return request<RecoveryEvidencePackage>(
+    `/recovery/${encodeURIComponent(entityType)}/${encodeURIComponent(transactionId)}/evidence-package`,
     { method: "POST" },
   );
 }
