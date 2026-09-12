@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.20.0") {
+  if ([string]$health.version -ne "0.21.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.20.0, got $($health.version)."
+    throw "Expected packaged engine version 0.21.0, got $($health.version)."
   }
 
   try {
@@ -190,6 +190,26 @@ try {
   }
 
   Write-Host "Packaged Recovery Reconciliation endpoint OK: count=$(@($reconciliations).Count)"
+
+  $evidenceRoute = "/recovery/{entity_type}/{transaction_id}/evidence-package"
+  if ($null -eq $openApi.paths.PSObject.Properties[$evidenceRoute]) {
+    Write-EngineLogs
+    throw "Packaged Recovery Evidence route is missing from OpenAPI."
+  }
+
+  try {
+    $evidenceCapabilities = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/recovery-evidence/capabilities" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Recovery Evidence capabilities endpoint failed: $($_.Exception.Message)"
+  }
+
+  if ([string]$evidenceCapabilities.schema -ne "deskai-recovery-evidence-v1" -or $evidenceCapabilities.user_files_modified -ne $false) {
+    Write-EngineLogs
+    throw "Packaged Recovery Evidence capabilities returned an invalid payload."
+  }
+
+  Write-Host "Packaged Recovery Evidence endpoint OK: schema=$($evidenceCapabilities.schema)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force
