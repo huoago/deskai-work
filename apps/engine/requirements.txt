@@ -12,3 +12,5 @@ Pillow>=11,<13
 lancedb>=0.25,<1
 openai>=2,<3
 keyring>=25,<26
+onnxruntime>=1.23,<2
+tokenizers>=0.22,<1
