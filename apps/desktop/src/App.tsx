@@ -2022,6 +2022,18 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
 
+              {detail.work_plans.map((plan) => (
+                <WorkPlanPanel
+                  key={plan.id}
+                  plan={plan}
+                  disabled={disabled}
+                  onStart={onStartWorkPlan}
+                  onResume={onResumeWorkPlan}
+                  onRetry={onRetryWorkPlan}
+                  onCancel={onCancelWorkPlan}
+                />
+              ))}
+
               {recycleBatches.length > 0 && (
                 <div className="source-edit-section recycle-section batch-transaction-section">
                   <div className="artifact-section-head">
@@ -2379,12 +2391,13 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 </div>
               )}
 
-              {["failed", "blocked"].includes(detail.status) && (
+              {detail.execution_mode === "agent" && ["failed", "blocked"].includes(detail.status) && (
                 <button className="secondary" onClick={() => onRetry(detail.id)} disabled={disabled}>重新入队</button>
               )}
 
               <div className="task-run-summary">
                 <span>运行 {detail.runs.length} 次</span>
+                <span>工作计划 {detail.work_plans.length} 个</span>
                 <span>工具调用 {detail.tool_calls.length} 次</span>
                 <span>生成文件 {detail.artifacts.length} 个</span>
                 <span>单文件提案 {singleEdits.length} 个</span>
