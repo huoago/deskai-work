@@ -1020,23 +1020,25 @@ class WorkPlanService:
         now = datetime.now(timezone.utc)
         resolve_error: str | None = None
         arguments: dict[str, Any] = {}
-        cancel_before_step = False
+        stop_before_step: str | None = None
         with self.database.session() as session:
             plan = session.get(WorkPlan, plan_id)
             step = session.get(WorkPlanStep, step_id)
             if plan is None or step is None:
                 raise RuntimeError("Work plan step disappeared")
-            if plan.status == "cancelling":
-                cancel_before_step = True
+            if plan.status in {"cancelling", "pausing"}:
+                stop_before_step = plan.status
             else:
                 step.status = "running"
                 step.started_at = now
+                step.timeout_exceeded = False
+                plan.auto_steps_used += 1
             task_id = plan.task_id
             workspace_id = plan.workspace_id
             tool_name = step.tool_name
             execution_mode = step.execution_mode
             risk_level = step.risk_level
-            if not cancel_before_step:
+            if stop_before_step is None:
                 try:
                     arguments = self._resolve_arguments(session, step)
                 except Exception as exc:
@@ -1045,13 +1047,14 @@ class WorkPlanService:
                     step.error_message = resolve_error
                     step.completed_at = datetime.now(timezone.utc)
 
-        if cancel_before_step:
+        if stop_before_step is not None:
             return
 
         if resolve_error is not None:
             self._fail_step(plan_id, step_id, run_id, resolve_error)
             return
 
+        started = time.monotonic()
         result = self.tool_registry.execute(
             agent_run_id=run_id,
             task_id=task_id,
@@ -1059,13 +1062,26 @@ class WorkPlanService:
             tool_name=tool_name,
             arguments=arguments,
         )
+        duration = max(0.0, time.monotonic() - started)
+        timeout_exceeded = self._record_attempt_runtime(
+            plan_id,
+            step_id,
+            duration,
+            run_id=run_id,
+        )
+
         if not result.get("ok"):
             message = str(result.get("error") or "Tool execution failed")
             self._fail_step(plan_id, step_id, run_id, message)
             return
 
         actual = result.get("result")
-        summary = json.dumps(actual, ensure_ascii=False, separators=(",", ":"), default=str)[:4000]
+        summary = json.dumps(
+            actual,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )[:4000]
         tool_call_id = str(result.get("tool_call_id") or "") or None
 
         if execution_mode == "proposal_gate":
@@ -1100,6 +1116,7 @@ class WorkPlanService:
                 if not cancel_requested:
                     plan_row.status = "awaiting_confirmation"
                     plan_row.error_message = None
+                    plan_row.pause_reason = None
                 if task is not None:
                     task.progress = self._task_progress(session, plan_id)
                     if not cancel_requested:
@@ -1107,6 +1124,25 @@ class WorkPlanService:
                         task.error_message = (
                             "Work plan paused at an existing file-transaction confirmation gate"
                         )
+                self._event(
+                    session,
+                    plan_row,
+                    step_id=step.id,
+                    event_type=(
+                        "proposal_created_after_cancel_request"
+                        if cancel_requested
+                        else "proposal_confirmation_required"
+                    ),
+                    severity="action",
+                    message=(
+                        "Protected file proposal created; original confirmation is required"
+                    ),
+                    data={
+                        "entity_type": external_type,
+                        "entity_id": str(actual["id"]),
+                        "timeout_exceeded": timeout_exceeded,
+                    },
+                )
                 session.add(
                     AuditLog(
                         task_id=task_id,
@@ -1120,7 +1156,9 @@ class WorkPlanService:
                         result=(
                             f"tool={tool_name}; entity_type={external_type}; "
                             f"entity_id={actual['id']}; automatic_file_mutation=false; "
-                            f"cancel_requested={str(cancel_requested).lower()}"
+                            f"cancel_requested={str(cancel_requested).lower()}; "
+                            f"duration_seconds={duration:.3f}; "
+                            f"timeout_exceeded={str(timeout_exceeded).lower()}"
                         ),
                         risk_level=risk_level,
                     )
@@ -1137,14 +1175,54 @@ class WorkPlanService:
             if plan_row is None or step is None:
                 raise RuntimeError("Work plan step disappeared after tool execution")
             cancel_requested = plan_row.status == "cancelling"
+            pause_requested = plan_row.status == "pausing"
             step.status = "completed"
             step.completed_at = datetime.now(timezone.utc)
             step.result_summary = summary
             step.result_json = actual
             step.tool_call_id = tool_call_id
             step.error_message = None
+
+            if timeout_exceeded and not cancel_requested and not pause_requested:
+                plan_row.status = "paused"
+                plan_row.paused_at = datetime.now(timezone.utc)
+                plan_row.pause_reason = (
+                    f"Step {step.position} exceeded the supervised timeout "
+                    f"of {plan_row.step_timeout_seconds} seconds"
+                )
+                plan_row.error_message = plan_row.pause_reason
+                if task is not None:
+                    task.status = "paused"
+                    task.error_message = plan_row.pause_reason
+                self._event(
+                    session,
+                    plan_row,
+                    step_id=step.id,
+                    event_type="step_timeout",
+                    severity="action",
+                    message=plan_row.pause_reason,
+                    data={
+                        "duration_seconds": duration,
+                        "step_timeout_seconds": plan_row.step_timeout_seconds,
+                        "tool_name": step.tool_name,
+                    },
+                )
+
             if task is not None:
                 task.progress = self._task_progress(session, plan_id)
+            self._event(
+                session,
+                plan_row,
+                step_id=step.id,
+                event_type="step_completed",
+                severity="info",
+                message=f"Step {step.position} completed",
+                data={
+                    "tool_name": tool_name,
+                    "duration_seconds": duration,
+                    "timeout_exceeded": timeout_exceeded,
+                },
+            )
             session.add(
                 AuditLog(
                     task_id=task_id,
@@ -1157,7 +1235,9 @@ class WorkPlanService:
                     target=step_id,
                     result=(
                         f"position={step.position}; tool={tool_name}; "
-                        f"cancel_requested={str(cancel_requested).lower()}"
+                        f"cancel_requested={str(cancel_requested).lower()}; "
+                        f"duration_seconds={duration:.3f}; "
+                        f"timeout_exceeded={str(timeout_exceeded).lower()}"
                     ),
                     risk_level=risk_level,
                 )
