@@ -655,3 +655,23 @@ Security invariants:
 - the manual Worker process endpoint follows the same claim/execution path and does not bypass permissions, confirmation gates or audit;
 - no arbitrary shell, Python, browser/GUI control, direct filesystem mutation, force overwrite, ignore-SHA, purge or unattended destructive recovery capability is added.
 
+## Phase 24 — Work Plan Supervision & Human Control
+
+Phase 24 adds persistent human supervision to WorkPlan execution without adding new tool authority.
+
+Security invariants:
+
+- Pause on a running plan records `pausing`; it never kills the current tool thread, and the Worker stops only after that tool returns safely;
+- the per-step timeout is a soft supervisory timeout: elapsed duration is recorded, the returned result is persisted, and later execution stops; no thread/process kill is attempted;
+- Skip is available only for unexecuted `auto` steps with no external proposal and no active later dependency;
+- `proposal_gate` steps can never be skipped and continue to use Phase 11–16 confirmation;
+- locally derived risk level remains authoritative; `approval_risk_threshold` can add an `awaiting_step_approval` gate but can never lower PermissionGate risk or allow an unavailable tool;
+- Step Approval only returns that step to pending/queued state and does not directly invoke the tool or confirm a file proposal;
+- automatic/tool-step and runtime budgets pause the plan when exhausted; increasing a budget changes only execution allowance, not filesystem or permission scope;
+- failure policy is limited to `pause` or `stop`; there is no unattended skip-on-failure behavior;
+- Retry remains required for failed/interrupted steps and still refuses automatic retry after a persistent external file proposal has been created;
+- WorkPlanEvent timeline/notification records are metadata only; acknowledging a notification cannot change task, step, file, recovery or permission state;
+- ETA derives only from completed measured step durations and is informational;
+- all actual tools still run through ToolRegistry + PermissionGate + ToolCall/AuditLog;
+- the original Phase 11–23 file transaction, recovery and durable-runner boundaries remain authoritative.
+
