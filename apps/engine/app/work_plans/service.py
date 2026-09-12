@@ -183,6 +183,12 @@ class WorkPlanService:
                     (step.result_summary or "")
                     + f" | human_confirmation_status={state}"
                 )[:4000]
+                if isinstance(step.result_json, dict):
+                    step.result_json = {
+                        **step.result_json,
+                        "status": state,
+                        "human_confirmation_status": state,
+                    }
                 plan_row.status = "running"
                 plan_row.error_message = None
                 if task is not None:
@@ -202,7 +208,7 @@ class WorkPlanService:
                 )
             return self._advance(plan_id, event="work_plan_resumed")
 
-        if state == "pending":
+        if state in {"pending", "applying", "recycling"}:
             raise ValueError("The existing file proposal is still waiting for human confirmation")
 
         self._block_after_gate(
@@ -458,12 +464,19 @@ class WorkPlanService:
                 raise RuntimeError("Work plan step disappeared")
             step.status = "running"
             step.started_at = now
-            arguments = self._resolve_arguments(session, step)
             task_id = plan.task_id
             workspace_id = plan.workspace_id
             tool_name = step.tool_name
             execution_mode = step.execution_mode
             risk_level = step.risk_level
+            try:
+                arguments = self._resolve_arguments(session, step)
+            except Exception as exc:
+                message = f"{type(exc).__name__}: {exc}"[:4000]
+                step.status = "failed"
+                step.error_message = message
+                step.completed_at = datetime.now(timezone.utc)
+                raise RuntimeError(message) from exc
 
         result = self.tool_registry.execute(
             agent_run_id=run_id,
@@ -556,15 +569,17 @@ class WorkPlanService:
 
     def _resolve_arguments(self, session, step: WorkPlanStep) -> dict[str, Any]:
         dependencies = {int(value) for value in (step.dependencies_json or [])}
-        prior = {
-            item.position: item
-            for item in session.scalars(
-                select(WorkPlanStep).where(
-                    WorkPlanStep.plan_id == step.plan_id,
-                    WorkPlanStep.position.in_(dependencies) if dependencies else False,
-                )
-            ).all()
-        }
+        prior: dict[int, WorkPlanStep] = {}
+        if dependencies:
+            prior = {
+                item.position: item
+                for item in session.scalars(
+                    select(WorkPlanStep).where(
+                        WorkPlanStep.plan_id == step.plan_id,
+                        WorkPlanStep.position.in_(dependencies),
+                    )
+                ).all()
+            }
 
         def lookup(position: int, path: str | None) -> Any:
             if position not in dependencies:
