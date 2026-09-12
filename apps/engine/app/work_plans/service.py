@@ -818,7 +818,7 @@ class WorkPlanService:
     def _advance(self, plan_id: str, *, event: str) -> dict[str, Any]:
         run_id = self._start_execution(plan_id, event=event)
         try:
-            for _ in range(12):
+            for _ in range(100):
                 current_plan = self._plan_record(plan_id)
                 if current_plan.status == "cancelling":
                     self._finalize_cancel(
@@ -827,8 +827,21 @@ class WorkPlanService:
                         reason="Cancellation request observed by background runner",
                     )
                     return self.get(plan_id)
+                if current_plan.status == "pausing":
+                    self._finalize_pause(
+                        plan_id,
+                        run_id=run_id,
+                        reason=current_plan.pause_reason or "Pause requested by user",
+                    )
+                    return self.get(plan_id)
 
+                pause_for_budget = False
+                awaiting_approval = False
                 with self.database.session() as session:
+                    plan = session.get(WorkPlan, plan_id)
+                    if plan is None:
+                        raise RuntimeError("Work plan disappeared")
+                    task = session.get(Task, plan.task_id)
                     steps = list(
                         session.scalars(
                             select(WorkPlanStep)
@@ -836,42 +849,141 @@ class WorkPlanService:
                             .order_by(WorkPlanStep.position)
                         ).all()
                     )
-                    completed = {
-                        step.position for step in steps if step.status == "completed"
+                    terminal = {
+                        step.position
+                        for step in steps
+                        if step.status in {"completed", "skipped"}
                     }
-                    if steps and len(completed) == len(steps):
-                        self._complete(plan_id, run_id)
-                        return self.get(plan_id)
-
-                    waiting = next(
-                        (
-                            step
-                            for step in steps
-                            if step.status == "awaiting_confirmation"
-                        ),
-                        None,
-                    )
-                    if waiting is not None:
-                        self._finish_run(run_id, "awaiting_confirmation")
-                        return self.get(plan_id)
-
-                    step = next(
-                        (
-                            item
-                            for item in steps
-                            if item.status == "pending"
-                            and set(
-                                int(value)
-                                for value in (item.dependencies_json or [])
-                            ).issubset(completed)
-                        ),
-                        None,
-                    )
-                    if step is None:
-                        raise RuntimeError(
-                            "Work plan has pending steps with unsatisfied dependencies"
+                    if steps and len(terminal) == len(steps):
+                        pass_complete = True
+                        step_id = None
+                    else:
+                        pass_complete = False
+                        waiting = next(
+                            (
+                                step
+                                for step in steps
+                                if step.status == "awaiting_confirmation"
+                            ),
+                            None,
                         )
-                    step_id = step.id
+                        if waiting is not None:
+                            self._finish_run(run_id, "awaiting_confirmation")
+                            return self._payload(session, plan)
+
+                        approval_wait = next(
+                            (
+                                step
+                                for step in steps
+                                if step.status == "awaiting_step_approval"
+                            ),
+                            None,
+                        )
+                        if approval_wait is not None:
+                            self._finish_run(run_id, "awaiting_step_approval")
+                            return self._payload(session, plan)
+
+                        budget_reason = self._budget_exhaustion_reason(plan)
+                        if budget_reason:
+                            plan.status = "paused"
+                            plan.pause_reason = budget_reason
+                            plan.paused_at = datetime.now(timezone.utc)
+                            plan.error_message = budget_reason
+                            if task is not None:
+                                task.status = "paused"
+                                task.error_message = budget_reason
+                            self._event(
+                                session,
+                                plan,
+                                event_type="budget_exhausted",
+                                severity="action",
+                                message=budget_reason,
+                                data={
+                                    "auto_steps_used": plan.auto_steps_used,
+                                    "max_auto_steps": plan.max_auto_steps,
+                                    "runtime_seconds_used": plan.runtime_seconds_used,
+                                    "runtime_budget_seconds": plan.runtime_budget_seconds,
+                                },
+                            )
+                            session.add(
+                                AuditLog(
+                                    task_id=plan.task_id,
+                                    agent_run_id=run_id,
+                                    action="work_plan_budget_exhausted",
+                                    target=plan.id,
+                                    result=budget_reason,
+                                    risk_level=0,
+                                )
+                            )
+                            pause_for_budget = True
+                            step_id = None
+                        else:
+                            step = next(
+                                (
+                                    item
+                                    for item in steps
+                                    if item.status == "pending"
+                                    and set(
+                                        int(value)
+                                        for value in (item.dependencies_json or [])
+                                    ).issubset(terminal)
+                                ),
+                                None,
+                            )
+                            if step is None:
+                                raise RuntimeError(
+                                    "Work plan has pending steps with unsatisfied dependencies"
+                                )
+
+                            if self._step_needs_approval(plan, step):
+                                step.status = "awaiting_step_approval"
+                                plan.status = "awaiting_step_approval"
+                                plan.error_message = (
+                                    f"Step {step.position} requires human approval before execution"
+                                )
+                                if task is not None:
+                                    task.status = "awaiting_step_approval"
+                                    task.error_message = plan.error_message
+                                self._event(
+                                    session,
+                                    plan,
+                                    step_id=step.id,
+                                    event_type="step_approval_required",
+                                    severity="action",
+                                    message=plan.error_message,
+                                    data={
+                                        "position": step.position,
+                                        "tool_name": step.tool_name,
+                                        "risk_level": step.risk_level,
+                                        "approval_risk_threshold": plan.approval_risk_threshold,
+                                    },
+                                )
+                                session.add(
+                                    AuditLog(
+                                        task_id=plan.task_id,
+                                        agent_run_id=run_id,
+                                        action="work_plan_step_approval_required",
+                                        target=step.id,
+                                        result=plan.error_message,
+                                        risk_level=step.risk_level,
+                                    )
+                                )
+                                awaiting_approval = True
+                                step_id = None
+                            else:
+                                step_id = step.id
+
+                if pass_complete:
+                    self._complete(plan_id, run_id)
+                    return self.get(plan_id)
+                if pause_for_budget:
+                    self._finish_run(run_id, "paused")
+                    return self.get(plan_id)
+                if awaiting_approval:
+                    self._finish_run(run_id, "awaiting_step_approval")
+                    return self.get(plan_id)
+                if step_id is None:
+                    raise RuntimeError("Work plan did not resolve a runnable step")
 
                 self._execute_step(plan_id, step_id, run_id)
                 current = self.get(plan_id)
@@ -882,8 +994,16 @@ class WorkPlanService:
                         reason="Cancellation request observed after current tool completed",
                     )
                     return self.get(plan_id)
+                if current["status"] == "pausing":
+                    self._finalize_pause(
+                        plan_id,
+                        run_id=run_id,
+                        reason=current.get("pause_reason") or "Pause requested by user",
+                    )
+                    return self.get(plan_id)
                 if current["status"] in {
                     "awaiting_confirmation",
+                    "awaiting_step_approval",
                     "failed",
                     "blocked",
                     "cancelled",
@@ -891,7 +1011,7 @@ class WorkPlanService:
                 }:
                     return current
 
-            raise RuntimeError("Work plan exceeded the 12-step execution limit")
+            raise RuntimeError("Work plan exceeded the supervised execution loop limit")
         except Exception as exc:
             self._fail(plan_id, run_id, f"{type(exc).__name__}: {exc}")
             return self.get(plan_id)
