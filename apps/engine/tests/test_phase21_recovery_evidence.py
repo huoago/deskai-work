@@ -156,23 +156,22 @@ def test_phase21_batch_member_cannot_be_exported_as_independent_transaction(
         "/tasks",
         json={"workspace_id": workspace["id"], "request": "batch evidence"},
     ).json()
-    edits = []
-    for file in files:
-        item = client.app.state.source_edit_service.propose(
-            task_id=task["id"],
-            workspace_id=workspace["id"],
-            file_id=file["id"],
-            mode="text_replace",
-            summary="member",
-            replacements=[{"find": "old", "replace": "new", "replace_all": True}],
-            cell_edits=[],
-        )
-        edits.append(item)
     batch = client.app.state.source_edit_batch_service.propose(
         task_id=task["id"],
         workspace_id=workspace["id"],
         summary="Phase 21 batch",
-        edit_ids=[item["id"] for item in edits],
+        edits=[
+            {
+                "file_id": file["id"],
+                "mode": "text_replace",
+                "summary": "member",
+                "replacements": [
+                    {"find": "old", "replace": "new", "replace_all": True}
+                ],
+                "cell_edits": [],
+            }
+            for file in files
+        ],
     )
     member_id = batch["edits"][0]["id"]
     response = client.post(f"/recovery/source_edit/{member_id}/evidence-package")
