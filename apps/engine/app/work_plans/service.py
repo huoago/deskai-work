@@ -405,11 +405,9 @@ class WorkPlanService:
             return self._payload(session, plan)
 
     def _advance(self, plan_id: str, *, event: str) -> dict[str, Any]:
-        plan = self._plan_record(plan_id)
         run_id = self._start_execution(plan_id, event=event)
         try:
             for _ in range(12):
-                plan = self._plan_record(plan_id)
                 with self.database.session() as session:
                     steps = list(
                         session.scalars(
