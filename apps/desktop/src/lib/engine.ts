@@ -950,7 +950,7 @@ export function proposeRecoveryReconciliation(
   transactionId: string,
 ): Promise<RecoveryReconciliationProposal> {
   return request<RecoveryReconciliationProposal>(
-    `/recovery-reconciliations/${encodeURIComponent(entityType)}/${encodeURIComponent(transactionId)}`,
+    `/recovery-reconciliations/transactions/${encodeURIComponent(entityType)}/${encodeURIComponent(transactionId)}`,
     { method: "POST" },
   );
 }
