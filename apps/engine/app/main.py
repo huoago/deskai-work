@@ -22,6 +22,7 @@ from app.api.recycle import router as recycle_router
 from app.api.recycle_batches import router as recycle_batches_router
 from app.api.recovery import router as recovery_router
 from app.api.recovery_reconciliation import router as recovery_reconciliation_router
+from app.api.recovery_evidence import router as recovery_evidence_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
 from app.api.source_edit_batches import router as source_edit_batches_router
@@ -42,6 +43,7 @@ from app.file_ops.service import FileOrganizationService
 from app.recycle.batch_service import FileRecycleBatchService
 from app.recycle.service import FileRecycleService
 from app.recovery.reconciliation import RecoveryReconciliationService
+from app.recovery.evidence import RecoveryEvidenceService
 from app.recovery.snapshot import RecoverySnapshotService
 from app.indexing.watcher import WorkspaceWatcher
 from app.knowledge.search import HybridSearch
@@ -157,6 +159,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.database,
             app.state.recovery_snapshot_service,
         )
+        app.state.recovery_evidence_service = RecoveryEvidenceService(
+            app.state.database,
+            app.state.recovery_snapshot_service,
+            app.state.recovery_reconciliation_service,
+            artifact_service,
+        )
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
@@ -252,6 +260,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(recycle_batches_router)
     app.include_router(recovery_router)
     app.include_router(recovery_reconciliation_router)
+    app.include_router(recovery_evidence_router)
     app.include_router(chat_router)
     app.include_router(settings_router)
     app.include_router(source_edit_batches_router)
