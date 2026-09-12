@@ -636,3 +636,22 @@ Security invariants:
 - interrupted steps require explicit Retry, and steps that already created persistent file proposals cannot be automatically retried;
 - all actual tool executions continue to create ToolCall and AuditLog records under the original policy.
 
+## Phase 23 — Durable background work-plan runner
+
+Phase 23 changes when a persisted plan runs; it does not expand what the plan is allowed to do.
+
+Security invariants:
+
+- Start, Resume and Retry persist `queued` state and wake a dedicated WorkPlanWorker instead of executing the complete plan in the HTTP request;
+- WorkPlanWorker can execute only plans it has persistently claimed from `queued` to `running`;
+- each tool still executes through the original ToolRegistry and local PermissionGate and keeps the same risk/confirmation policy;
+- proposal-gate steps still create only the original Phase 11–16 proposal and leave the plan at `awaiting_confirmation`;
+- startup recovery requeues a previously running plan only when no step is marked `running`, so completed checkpoints can be retained without replaying an ambiguous tool;
+- if a step is still `running` after restart, the plan freezes as `paused` and the step becomes `interrupted`; explicit Retry is required;
+- active cancellation sets `cancelling` and never force-kills the current tool;
+- after the current tool returns, its result is persisted and later steps are cancelled;
+- if a proposal was created during cancellation, the proposal is preserved under its original confirmation API and is not applied, rejected, restored, rolled back or deleted automatically;
+- queued-plan cancellation prevents Worker claim and therefore prevents any new tool call;
+- the manual Worker process endpoint follows the same claim/execution path and does not bypass permissions, confirmation gates or audit;
+- no arbitrary shell, Python, browser/GUI control, direct filesystem mutation, force overwrite, ignore-SHA, purge or unattended destructive recovery capability is added.
+

@@ -20,6 +20,7 @@ import {
   getDesktopSettings,
   getIndexQueueSummary,
   getAgentStatus,
+  getWorkPlanWorkerStatus,
   getKnowledgeStatus,
   getMemoryStatus,
   getOpenAIProviderStatus,
@@ -96,6 +97,7 @@ import {
   type Workspace,
   type WorkspaceRoot,
   type WorkPlanRecord,
+  type WorkPlanWorkerStatus,
 } from "./lib/engine";
 
 type EngineState =
@@ -149,6 +151,7 @@ export default function App() {
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [workPlanWorkerStatus, setWorkPlanWorkerStatus] = useState<WorkPlanWorkerStatus | null>(null);
   const [activity, setActivity] = useState<ActivityRecord[]>([]);
   const [recoveryEntries, setRecoveryEntries] = useState<RecoveryEntry[]>([]);
   const [taskRequest, setTaskRequest] = useState("");
@@ -218,6 +221,7 @@ export default function App() {
       setMemoryStatus(null);
       setTasks([]);
       setAgentStatus(null);
+      setWorkPlanWorkerStatus(null);
       setActivity([]);
       setRecoveryEntries([]);
       setTaskDetail(null);
@@ -243,6 +247,17 @@ export default function App() {
   }, [activeConversationId]);
 
   useEffect(() => {
+    if (page !== "tasks" || engine.kind !== "online" || !taskDetail?.id) return;
+    const taskId = taskDetail.id;
+    const timer = window.setInterval(() => {
+      getTask(taskId)
+        .then((next) => setTaskDetail(next))
+        .catch(() => undefined);
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [engine.kind, page, taskDetail?.id]);
+
+  useEffect(() => {
     if (!activeWorkspaceId || engine.kind !== "online" || !["workspace", "files", "search", "memory", "tasks", "recovery", "activity"].includes(page)) return;
     const timer = window.setInterval(() => {
       Promise.all([
@@ -255,10 +270,11 @@ export default function App() {
         getMemoryStatus(activeWorkspaceId),
         listTasks(activeWorkspaceId),
         getAgentStatus(activeWorkspaceId),
+        getWorkPlanWorkerStatus(),
         listActivity(activeWorkspaceId),
         listRecovery(activeWorkspaceId),
       ])
-        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity, nextRecovery]) => {
+        .then(([nextFiles, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextWorkPlanWorkerStatus, nextActivity, nextRecovery]) => {
           setFiles(nextFiles);
           setWatcher(nextWatcher);
           setQueue(nextQueue);
@@ -268,6 +284,7 @@ export default function App() {
           setMemoryStatus(nextMemoryStatus);
           setTasks(nextTasks);
           setAgentStatus(nextAgentStatus);
+          setWorkPlanWorkerStatus(nextWorkPlanWorkerStatus);
           setActivity(nextActivity);
           setRecoveryEntries(nextRecovery);
         })
@@ -287,7 +304,7 @@ export default function App() {
 
   async function refreshWorkspaceData(workspaceId = activeWorkspaceId) {
     if (!workspaceId) return;
-    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextActivity, nextRecovery] = await Promise.all([
+    const [nextRoots, nextFiles, nextConversations, nextWatcher, nextQueue, nextParserStatus, nextKnowledgeStatus, nextMemories, nextMemoryStatus, nextTasks, nextAgentStatus, nextWorkPlanWorkerStatus, nextActivity, nextRecovery] = await Promise.all([
       listWorkspaceRoots(workspaceId),
       listFiles(workspaceId),
       listConversations(workspaceId),
@@ -299,6 +316,7 @@ export default function App() {
       getMemoryStatus(workspaceId),
       listTasks(workspaceId),
       getAgentStatus(workspaceId),
+      getWorkPlanWorkerStatus(),
       listActivity(workspaceId),
       listRecovery(workspaceId),
     ]);
@@ -313,6 +331,7 @@ export default function App() {
     setMemoryStatus(nextMemoryStatus);
     setTasks(nextTasks);
     setAgentStatus(nextAgentStatus);
+    setWorkPlanWorkerStatus(nextWorkPlanWorkerStatus);
     setActivity(nextActivity);
     setRecoveryEntries(nextRecovery);
     setActiveConversationId((current) => {
@@ -1092,7 +1111,7 @@ export default function App() {
       const result = await startWorkPlan(plan.id);
       await refreshWorkspaceData();
       setTaskDetail(await getTask(plan.task_id));
-      setNotice(result.status === "awaiting_confirmation" ? "计划已执行到人工确认门禁。请在下方审核对应文件提案，确认后再点击“继续计划”。" : result.status === "completed" ? "多步骤工作计划已完成。" : `计划状态：${result.status}`);
+      setNotice(result.status === "queued" ? "计划已进入后台执行队列。任务详情会自动刷新；遇到文件提案时会停在人工确认门禁。" : `计划状态：${result.status}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "启动工作计划失败");
     } finally {
@@ -1107,7 +1126,7 @@ export default function App() {
       const result = await resumeWorkPlan(plan.id);
       await refreshWorkspaceData();
       setTaskDetail(await getTask(plan.task_id));
-      setNotice(result.status === "completed" ? "人工确认已被计划状态机识别，后续步骤执行完成。" : result.status === "blocked" ? "计划未绕过被拒绝或异常的文件动作，已安全阻断。" : `计划已继续，当前状态：${result.status}`);
+      setNotice(result.status === "queued" ? "人工确认已被识别，计划已重新进入后台队列。" : result.status === "blocked" ? "计划未绕过被拒绝或异常的文件动作，已安全阻断。" : `计划当前状态：${result.status}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "继续工作计划失败");
     } finally {
@@ -1123,7 +1142,7 @@ export default function App() {
       const result = await retryWorkPlan(plan.id);
       await refreshWorkspaceData();
       setTaskDetail(await getTask(plan.task_id));
-      setNotice(result.status === "completed" ? "重试后计划已完成。" : `重试后状态：${result.status}`);
+      setNotice(result.status === "queued" ? "中断/失败步骤已重新排队，后台 Worker 将继续执行。" : `重试后状态：${result.status}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "重试工作计划失败");
     } finally {
@@ -1136,10 +1155,10 @@ export default function App() {
     setBusy(true);
     setNotice("");
     try {
-      await cancelWorkPlan(plan.id);
+      const result = await cancelWorkPlan(plan.id);
       await refreshWorkspaceData();
       setTaskDetail(await getTask(plan.task_id));
-      setNotice("工作计划已取消；已有提案保持原状态，没有执行额外文件操作。");
+      setNotice(result.status === "cancelling" ? "取消请求已记录。当前工具会安全结束，随后后台计划停止；已有提案不会被自动删除。" : "工作计划已取消；已有提案保持原状态，没有执行额外文件操作。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "取消工作计划失败");
     } finally {
@@ -1342,6 +1361,7 @@ export default function App() {
             workspace={activeWorkspace}
             tasks={tasks}
             status={agentStatus}
+            workPlanWorkerStatus={workPlanWorkerStatus}
             detail={taskDetail}
             request={taskRequest}
             setRequest={setTaskRequest}
@@ -1464,7 +1484,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 22 · 持久化多步骤工作计划</span>
+          <span className="phase-chip">Phase 23 · 后台持久化工作计划执行器</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1896,10 +1916,11 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onCreatePlan, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch, onStartWorkPlan, onResumeWorkPlan, onRetryWorkPlan, onCancelWorkPlan }: {
+function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, request, setRequest, disabled, onCreate, onCreatePlan, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch, onStartWorkPlan, onResumeWorkPlan, onRetryWorkPlan, onCancelWorkPlan }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
+  workPlanWorkerStatus: WorkPlanWorkerStatus | null;
   detail: TaskDetail | null;
   request: string;
   setRequest: (value: string) => void;
@@ -1932,8 +1953,8 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onRetryWorkPlan: (plan: WorkPlanRecord) => void;
   onCancelWorkPlan: (plan: WorkPlanRecord) => void;
 }) {
-  const pending = tasks.filter((item) => ["pending", "planning", "planned"].includes(item.status)).length;
-  const running = tasks.filter((item) => item.status === "running").length;
+  const pending = tasks.filter((item) => ["pending", "planning", "planned", "queued"].includes(item.status)).length;
+  const running = tasks.filter((item) => ["running", "cancelling"].includes(item.status)).length;
   const waitingConfirmation = tasks.filter((item) => item.status === "awaiting_confirmation").length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
@@ -1956,13 +1977,14 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
         <Metric label="已完成" value={String(completed)} />
         <Metric label="需处理" value={String(attention)} />
         <Metric label="Agent Worker" value={status?.running ? "运行中" : "未运行"} />
+        <Metric label="Plan Worker" value={workPlanWorkerStatus?.running ? "运行中" : "未运行"} />
       </div>
 
       <article className="panel task-create-panel">
         <div className="panel-head">
           <div>
             <h3>创建工作任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。可继续使用即时 Agent，也可以先生成 Phase 22 多步骤计划。计划会持久化步骤、依赖、风险和执行结果；现有文件编辑/整理/回收仍只生成原 Phase 11–16 提案，并在人工确认门禁处暂停。</p>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。可继续使用即时 Agent，也可以先生成 Phase 23 后台多步骤计划。计划会持久化步骤、依赖、风险和执行结果，并由专用 Worker 后台推进；现有文件编辑/整理/回收仍只生成原 Phase 11–16 提案，并在人工确认门禁处暂停。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -3155,7 +3177,9 @@ function taskStatusLabel(status: string) {
     planning: "计划生成中",
     planned: "待开始计划",
     pending: "待执行",
+    queued: "后台排队",
     running: "执行中",
+    cancelling: "正在安全取消",
     awaiting_confirmation: "等待人工确认",
     completed: "已完成",
     failed: "失败",
@@ -3168,7 +3192,9 @@ function taskStatusLabel(status: string) {
 function workPlanStatusLabel(status: string) {
   const labels: Record<string, string> = {
     ready: "待开始",
+    queued: "后台排队",
     running: "执行中",
+    cancelling: "正在安全取消",
     awaiting_confirmation: "等待人工确认",
     completed: "已完成",
     failed: "失败",
@@ -3213,6 +3239,15 @@ function activityLabel(action: string) {
     work_plan_failed: "工作计划失败",
     work_plan_cancelled: "工作计划取消",
     work_plan_interrupted: "工作计划中断",
+    work_plan_queued: "工作计划进入后台队列",
+    work_plan_retry_queued: "工作计划重试已排队",
+    work_plan_worker_claimed: "后台 Worker 已领取计划",
+    work_plan_worker_started: "后台计划执行开始",
+    work_plan_worker_failed: "后台计划执行器异常",
+    work_plan_startup_requeued: "启动时安全恢复并重新排队",
+    work_plan_startup_cancelled: "启动时完成取消恢复",
+    work_plan_cancel_requested: "已请求安全取消计划",
+    work_plan_step_completed_after_cancel_request: "当前步骤完成后停止计划",
     tool_completed: "工具调用完成",
     tool_failed: "工具调用失败",
     tool_denied: "工具调用被拒绝",
@@ -3336,7 +3371,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 22</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 23</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -3371,6 +3406,9 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 22 多步骤计划的工具风险由本地 PermissionGate 重新计算，模型不能降低风险等级或发明未注册工具</p>
           <p><b>✓</b> Phase 22 现有文件动作只能运行 propose_* 提案工具，并在原人工确认门禁处暂停；Resume 只在原事务状态证明 applied/recycled 后继续</p>
           <p><b>✓</b> Engine 中断不会自动重放正在执行的计划步骤；计划冻结为 paused/interrupted，必须人工 Retry</p>
+          <p><b>✓</b> Phase 23 Start/Resume/Retry 只写入持久化队列并唤醒 WorkPlanWorker，HTTP 请求不再同步跑完整计划</p>
+          <p><b>✓</b> 重启时只自动恢复“没有 running 步骤”的安全检查点；未证明完成的 running 步骤仍冻结为 interrupted</p>
+          <p><b>✓</b> 执行中取消不会强杀当前工具；当前工具安全返回后停止后续步骤，已经创建的文件提案保持独立可审核状态</p>
         </div>
       </article>
     </section>

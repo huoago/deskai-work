@@ -27,6 +27,23 @@ def list_work_plans(
     )
 
 
+@router.get("/work-plan-worker/status")
+def get_work_plan_worker_status(request: Request) -> dict[str, Any]:
+    return request.app.state.work_plan_worker.snapshot().as_dict()
+
+
+@router.post("/work-plan-worker/process")
+def process_work_plan_queue(
+    request: Request,
+    limit: int = Query(default=3, ge=1, le=20),
+) -> dict[str, Any]:
+    processed = request.app.state.work_plan_worker.process_available(limit=limit)
+    return {
+        "processed": processed,
+        "worker": request.app.state.work_plan_worker.snapshot().as_dict(),
+    }
+
+
 @router.get("/work-plans/{plan_id}")
 def get_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
     try:
@@ -46,7 +63,9 @@ def draft_work_plan(task_id: str, request: Request) -> dict[str, Any]:
 @router.post("/work-plans/{plan_id}/start")
 def start_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
     try:
-        return request.app.state.work_plan_service.start(plan_id)
+        result = request.app.state.work_plan_service.start(plan_id)
+        request.app.state.work_plan_worker.wake()
+        return result
     except ValueError as exc:
         _raise_api_error(exc)
 
@@ -54,7 +73,10 @@ def start_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
 @router.post("/work-plans/{plan_id}/resume")
 def resume_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
     try:
-        return request.app.state.work_plan_service.resume(plan_id)
+        result = request.app.state.work_plan_service.resume(plan_id)
+        if result.get("status") == "queued":
+            request.app.state.work_plan_worker.wake()
+        return result
     except ValueError as exc:
         _raise_api_error(exc)
 
@@ -62,7 +84,9 @@ def resume_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
 @router.post("/work-plans/{plan_id}/retry")
 def retry_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
     try:
-        return request.app.state.work_plan_service.retry(plan_id)
+        result = request.app.state.work_plan_service.retry(plan_id)
+        request.app.state.work_plan_worker.wake()
+        return result
     except ValueError as exc:
         _raise_api_error(exc)
 

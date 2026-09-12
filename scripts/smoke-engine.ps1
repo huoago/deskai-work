@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.22.0") {
+  if ([string]$health.version -ne "0.23.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.22.0, got $($health.version)."
+    throw "Expected packaged engine version 0.23.0, got $($health.version)."
   }
 
   try {
@@ -235,6 +235,31 @@ try {
   }
 
   Write-Host "Packaged Work Plan endpoint OK: count=$(@($workPlans).Count)"
+
+  $workPlanWorkerStatusRoute = "/work-plan-worker/status"
+  $workPlanWorkerProcessRoute = "/work-plan-worker/process"
+  if ($null -eq $openApi.paths.PSObject.Properties[$workPlanWorkerStatusRoute]) {
+    Write-EngineLogs
+    throw "Packaged Work Plan Worker status route is missing from OpenAPI."
+  }
+  if ($null -eq $openApi.paths.PSObject.Properties[$workPlanWorkerProcessRoute]) {
+    Write-EngineLogs
+    throw "Packaged Work Plan Worker process route is missing from OpenAPI."
+  }
+
+  try {
+    $workPlanWorker = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/work-plan-worker/status" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Work Plan Worker status endpoint failed: $($_.Exception.Message)"
+  }
+
+  if ($null -eq $workPlanWorker.processed -or $null -eq $workPlanWorker.running) {
+    Write-EngineLogs
+    throw "Packaged Work Plan Worker status returned an invalid payload."
+  }
+
+  Write-Host "Packaged Work Plan Worker OK: running=$($workPlanWorker.running); processed=$($workPlanWorker.processed)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

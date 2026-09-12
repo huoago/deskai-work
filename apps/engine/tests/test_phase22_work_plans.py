@@ -36,6 +36,12 @@ def _wire_planner(client, payload: dict) -> FakePlanProvider:
     return provider
 
 
+def _process_work_plans(client, limit: int = 10) -> dict:
+    response = client.post("/work-plan-worker/process", params={"limit": limit})
+    assert response.status_code == 200
+    return response.json()
+
+
 def _plan_task(client, workspace_id: str, request: str = "Run a controlled plan"):
     response = client.post(
         "/tasks",
@@ -131,7 +137,10 @@ def test_phase22_draft_and_execute_dependency_result_reference(client):
 
     started = client.post(f"/work-plans/{plan['id']}/start")
     assert started.status_code == 200
-    finished = started.json()
+    assert started.json()["status"] == "queued"
+    processed = _process_work_plans(client)
+    assert processed["processed"] == 1
+    finished = client.get(f"/work-plans/{plan['id']}").json()
     assert finished["status"] == "completed"
     assert [item["status"] for item in finished["steps"]] == ["completed", "completed"]
     assert finished["steps"][0]["result"]["result"] == 5
@@ -183,9 +192,11 @@ def test_phase22_file_proposal_pauses_then_resumes_after_existing_confirmation(
     )
     plan = client.post(f"/tasks/{task['id']}/work-plan").json()
 
-    paused = client.post(f"/work-plans/{plan['id']}/start")
-    assert paused.status_code == 200
-    paused_plan = paused.json()
+    queued = client.post(f"/work-plans/{plan['id']}/start")
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "queued"
+    assert _process_work_plans(client)["processed"] == 1
+    paused_plan = client.get(f"/work-plans/{plan['id']}").json()
     assert paused_plan["status"] == "awaiting_confirmation"
     gate = paused_plan["steps"][0]
     assert gate["status"] == "awaiting_confirmation"
@@ -201,7 +212,9 @@ def test_phase22_file_proposal_pauses_then_resumes_after_existing_confirmation(
 
     resumed = client.post(f"/work-plans/{plan['id']}/resume")
     assert resumed.status_code == 200
-    completed = resumed.json()
+    assert resumed.json()["status"] == "queued"
+    assert _process_work_plans(client)["processed"] == 1
+    completed = client.get(f"/work-plans/{plan['id']}").json()
     assert completed["status"] == "completed"
     assert completed["steps"][0]["status"] == "completed"
     assert completed["steps"][1]["status"] == "completed"
@@ -235,7 +248,10 @@ def test_phase22_cancel_preserves_existing_pending_file_proposal(client, tmp_pat
         },
     )
     plan = client.post(f"/tasks/{task['id']}/work-plan").json()
-    paused = client.post(f"/work-plans/{plan['id']}/start").json()
+    queued = client.post(f"/work-plans/{plan['id']}/start").json()
+    assert queued["status"] == "queued"
+    assert _process_work_plans(client)["processed"] == 1
+    paused = client.get(f"/work-plans/{plan['id']}").json()
     proposal_id = paused["steps"][0]["external_entity_id"]
 
     cancelled = client.post(f"/work-plans/{plan['id']}/cancel")
@@ -282,7 +298,9 @@ def test_phase22_rejecting_gate_blocks_without_automatic_replanning(client, tmp_
         },
     )
     plan = client.post(f"/tasks/{task['id']}/work-plan").json()
-    paused = client.post(f"/work-plans/{plan['id']}/start").json()
+    assert client.post(f"/work-plans/{plan['id']}/start").json()["status"] == "queued"
+    assert _process_work_plans(client)["processed"] == 1
+    paused = client.get(f"/work-plans/{plan['id']}").json()
     proposal_id = paused["steps"][0]["external_entity_id"]
     assert client.post(f"/file-edits/{proposal_id}/reject").status_code == 200
 
@@ -362,5 +380,8 @@ def test_phase22_interrupted_step_freezes_until_explicit_retry(client):
 
     retried = client.post(f"/work-plans/{plan['id']}/retry")
     assert retried.status_code == 200
-    assert retried.json()["status"] == "completed"
-    assert retried.json()["steps"][0]["result"]["result"] == 16
+    assert retried.json()["status"] == "queued"
+    assert _process_work_plans(client)["processed"] == 1
+    completed = client.get(f"/work-plans/{plan['id']}").json()
+    assert completed["status"] == "completed"
+    assert completed["steps"][0]["result"]["result"] == 16

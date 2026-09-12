@@ -156,7 +156,12 @@ class WorkPlanService:
         plan = self._plan_record(plan_id)
         if plan.status != "ready":
             raise ValueError("Only a ready work plan can be started")
-        return self._advance(plan_id, event="work_plan_started")
+        self._queue_plan(
+            plan_id,
+            action="work_plan_queued",
+            result="Work plan queued for durable background execution",
+        )
+        return self.get(plan_id)
 
     def resume(self, plan_id: str) -> dict[str, Any]:
         plan = self._plan_record(plan_id)
@@ -189,11 +194,12 @@ class WorkPlanService:
                         "status": state,
                         "human_confirmation_status": state,
                     }
-                plan_row.status = "running"
+                plan_row.status = "queued"
                 plan_row.error_message = None
                 if task is not None:
-                    task.status = "running"
+                    task.status = "queued"
                     task.error_message = None
+                    task.completed_at = None
                 session.add(
                     AuditLog(
                         task_id=plan.task_id,
@@ -201,12 +207,13 @@ class WorkPlanService:
                         target=step.id,
                         result=(
                             f"tool={step.tool_name}; entity={step.external_entity_type}; "
-                            f"entity_id={step.external_entity_id}; status={state}"
+                            f"entity_id={step.external_entity_id}; status={state}; "
+                            "requeued=true"
                         ),
                         risk_level=step.risk_level,
                     )
                 )
-            return self._advance(plan_id, event="work_plan_resumed")
+            return self.get(plan_id)
 
         if state in {"pending", "applying", "recycling"}:
             raise ValueError("The existing file proposal is still waiting for human confirmation")
@@ -255,74 +262,60 @@ class WorkPlanService:
             plan_row = session.get(WorkPlan, plan_id)
             task = session.get(Task, plan.task_id)
             if plan_row is not None:
-                plan_row.status = "running"
+                plan_row.status = "queued"
                 plan_row.error_message = None
             if task is not None:
-                task.status = "running"
+                task.status = "queued"
                 task.error_message = None
                 task.completed_at = None
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
-                    action="work_plan_retry_requested",
+                    action="work_plan_retry_queued",
                     target=step.id,
                     result=f"position={step.position}; tool={step.tool_name}",
                     risk_level=step.risk_level,
                 )
             )
-        return self._advance(plan_id, event="work_plan_retried")
+        return self.get(plan_id)
 
     def cancel(self, plan_id: str) -> dict[str, Any]:
         plan = self._plan_record(plan_id)
         if plan.status in {"completed", "cancelled"}:
             raise ValueError("Work plan is already finished")
-
-        now = datetime.now(timezone.utc)
-        with self.database.session() as session:
-            plan_row = session.get(WorkPlan, plan_id)
-            if plan_row is None:
-                raise ValueError("Work plan not found")
-            steps = list(
-                session.scalars(
-                    select(WorkPlanStep).where(WorkPlanStep.plan_id == plan_id)
-                ).all()
-            )
-            preserved = []
-            for step in steps:
-                if step.status in {
-                    "pending",
-                    "running",
-                    "awaiting_confirmation",
-                    "failed",
-                    "interrupted",
-                }:
-                    if step.external_entity_id:
-                        preserved.append(f"{step.external_entity_type}:{step.external_entity_id}")
-                    step.status = "cancelled"
-                    step.completed_at = now
-            plan_row.status = "cancelled"
-            plan_row.cancelled_at = now
-            plan_row.completed_at = now
-            plan_row.error_message = None
-
-            task = session.get(Task, plan_row.task_id)
-            if task is not None:
-                task.status = "cancelled"
-                task.completed_at = now
-                task.error_message = None
-
-            session.add(
-                AuditLog(
-                    task_id=plan_row.task_id,
-                    action="work_plan_cancelled",
-                    target=plan_id,
-                    result=(
-                        "Pending execution stopped; existing proposals preserved="
-                        + (",".join(preserved) if preserved else "none")
-                    ),
-                    risk_level=0,
+        if plan.status == "cancelling":
+            return self.get(plan_id)
+        if plan.status == "running":
+            with self.database.session() as session:
+                plan_row = session.get(WorkPlan, plan_id)
+                if plan_row is None:
+                    raise ValueError("Work plan not found")
+                task = session.get(Task, plan_row.task_id)
+                plan_row.status = "cancelling"
+                plan_row.error_message = (
+                    "Cancellation requested; the current tool is allowed to finish safely."
                 )
-            )
+                if task is not None:
+                    task.status = "cancelling"
+                    task.error_message = plan_row.error_message
+                session.add(
+                    AuditLog(
+                        task_id=plan_row.task_id,
+                        action="work_plan_cancel_requested",
+                        target=plan_id,
+                        result=(
+                            "Cancellation requested during active execution; "
+                            "no force-kill or rollback was attempted"
+                        ),
+                        risk_level=0,
+                    )
+                )
+            return self.get(plan_id)
+
+        self._finalize_cancel(
+            plan_id,
+            reason="Work plan cancelled before another background step was claimed",
+        )
         return self.get(plan_id)
 
     def recover_interrupted(self) -> int:
@@ -331,35 +324,93 @@ class WorkPlanService:
         with self.database.session() as session:
             plans = list(
                 session.scalars(
-                    select(WorkPlan).where(WorkPlan.status == "running")
+                    select(WorkPlan).where(
+                        WorkPlan.status.in_(("running", "cancelling"))
+                    )
                 ).all()
             )
             for plan in plans:
                 recovered += 1
-                plan.status = "paused"
-                plan.error_message = (
-                    "Engine stopped during work-plan execution. "
-                    "The current step was not automatically repeated; explicit retry is required."
-                )
                 steps = list(
                     session.scalars(
                         select(WorkPlanStep).where(WorkPlanStep.plan_id == plan.id)
                     ).all()
                 )
-                for step in steps:
-                    if step.status == "running":
-                        step.status = "interrupted"
-                        step.error_message = "Interrupted before DeskAI could prove step completion"
+                running_steps = [step for step in steps if step.status == "running"]
                 task = session.get(Task, plan.task_id)
+
+                if running_steps:
+                    plan.status = "paused"
+                    plan.error_message = (
+                        "Engine stopped while a work-plan tool was running. "
+                        "That step was not replayed automatically; explicit retry is required."
+                    )
+                    for step in running_steps:
+                        step.status = "interrupted"
+                        step.error_message = (
+                            "Interrupted before DeskAI could prove tool completion"
+                        )
+                    if task is not None:
+                        task.status = "blocked"
+                        task.error_message = plan.error_message
+                    session.add(
+                        AuditLog(
+                            task_id=plan.task_id,
+                            action="work_plan_interrupted",
+                            target=plan.id,
+                            result=plan.error_message,
+                            risk_level=0,
+                        )
+                    )
+                    continue
+
+                if plan.status == "cancelling":
+                    for step in steps:
+                        if step.status in {
+                            "pending",
+                            "awaiting_confirmation",
+                            "failed",
+                            "interrupted",
+                        }:
+                            step.status = "cancelled"
+                            step.completed_at = step.completed_at or now
+                    plan.status = "cancelled"
+                    plan.cancelled_at = now
+                    plan.completed_at = now
+                    plan.error_message = None
+                    if task is not None:
+                        task.status = "cancelled"
+                        task.completed_at = now
+                        task.error_message = None
+                    session.add(
+                        AuditLog(
+                            task_id=plan.task_id,
+                            action="work_plan_startup_cancelled",
+                            target=plan.id,
+                            result=(
+                                "Recovered cancellation request with no ambiguous "
+                                "running step; pending execution remains stopped"
+                            ),
+                            risk_level=0,
+                        )
+                    )
+                    continue
+
+                plan.status = "queued"
+                plan.error_message = None
                 if task is not None:
-                    task.status = "blocked"
-                    task.error_message = plan.error_message
+                    task.status = "queued"
+                    task.error_message = None
+                    task.completed_at = None
                 session.add(
                     AuditLog(
                         task_id=plan.task_id,
-                        action="work_plan_interrupted",
+                        action="work_plan_startup_requeued",
                         target=plan.id,
-                        result=plan.error_message,
+                        result=(
+                            "Previous completed checkpoints were retained; "
+                            "no running step was found, so remaining work was safely requeued"
+                        ),
                         risk_level=0,
                     )
                 )
@@ -376,6 +427,66 @@ class WorkPlanService:
                 run.status = "interrupted"
                 run.completed_at = now
         return recovered
+
+    def execute_claimed(self, plan_id: str) -> dict[str, Any]:
+        plan = self._plan_record(plan_id)
+        if plan.status == "cancelling":
+            self._finalize_cancel(
+                plan_id,
+                reason="Cancellation was requested before background execution started",
+            )
+            return self.get(plan_id)
+        if plan.status != "running":
+            raise ValueError("Work plan must be claimed by the background worker first")
+        return self._advance(plan_id, event="work_plan_worker_started")
+
+    def mark_worker_failure(self, plan_id: str, exc: Exception) -> None:
+        message = f"{type(exc).__name__}: {exc}"[:4000]
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None or plan.status in {"completed", "cancelled"}:
+                return
+            steps = list(
+                session.scalars(
+                    select(WorkPlanStep).where(WorkPlanStep.plan_id == plan_id)
+                ).all()
+            )
+            for step in steps:
+                if step.status == "running":
+                    step.status = "interrupted"
+                    step.error_message = (
+                        "Background worker failed before DeskAI could prove tool completion"
+                    )
+            plan.status = "paused"
+            plan.error_message = (
+                "Background work-plan runner failed. The current step was not replayed."
+            )
+            task = session.get(Task, plan.task_id)
+            if task is not None:
+                task.status = "blocked"
+                task.error_message = plan.error_message
+            runs = list(
+                session.scalars(
+                    select(AgentRun).where(
+                        AgentRun.task_id == plan.task_id,
+                        AgentRun.status == "running",
+                        AgentRun.model == "work-plan-executor",
+                    )
+                ).all()
+            )
+            for run in runs:
+                run.status = "interrupted"
+                run.completed_at = now
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    action="work_plan_worker_failed",
+                    target=plan_id,
+                    result=message,
+                    risk_level=0,
+                )
+            )
 
     def list(
         self,
@@ -408,6 +519,15 @@ class WorkPlanService:
         run_id = self._start_execution(plan_id, event=event)
         try:
             for _ in range(12):
+                current_plan = self._plan_record(plan_id)
+                if current_plan.status == "cancelling":
+                    self._finalize_cancel(
+                        plan_id,
+                        run_id=run_id,
+                        reason="Cancellation request observed by background runner",
+                    )
+                    return self.get(plan_id)
+
                 with self.database.session() as session:
                     steps = list(
                         session.scalars(
@@ -416,13 +536,19 @@ class WorkPlanService:
                             .order_by(WorkPlanStep.position)
                         ).all()
                     )
-                    completed = {step.position for step in steps if step.status == "completed"}
+                    completed = {
+                        step.position for step in steps if step.status == "completed"
+                    }
                     if steps and len(completed) == len(steps):
                         self._complete(plan_id, run_id)
                         return self.get(plan_id)
 
                     waiting = next(
-                        (step for step in steps if step.status == "awaiting_confirmation"),
+                        (
+                            step
+                            for step in steps
+                            if step.status == "awaiting_confirmation"
+                        ),
                         None,
                     )
                     if waiting is not None:
@@ -434,18 +560,35 @@ class WorkPlanService:
                             item
                             for item in steps
                             if item.status == "pending"
-                            and set(int(value) for value in (item.dependencies_json or []))
-                            .issubset(completed)
+                            and set(
+                                int(value)
+                                for value in (item.dependencies_json or [])
+                            ).issubset(completed)
                         ),
                         None,
                     )
                     if step is None:
-                        raise RuntimeError("Work plan has pending steps with unsatisfied dependencies")
+                        raise RuntimeError(
+                            "Work plan has pending steps with unsatisfied dependencies"
+                        )
                     step_id = step.id
 
                 self._execute_step(plan_id, step_id, run_id)
                 current = self.get(plan_id)
-                if current["status"] in {"awaiting_confirmation", "failed", "blocked"}:
+                if current["status"] == "cancelling":
+                    self._finalize_cancel(
+                        plan_id,
+                        run_id=run_id,
+                        reason="Cancellation request observed after current tool completed",
+                    )
+                    return self.get(plan_id)
+                if current["status"] in {
+                    "awaiting_confirmation",
+                    "failed",
+                    "blocked",
+                    "cancelled",
+                    "paused",
+                }:
                     return current
 
             raise RuntimeError("Work plan exceeded the 12-step execution limit")
@@ -457,25 +600,33 @@ class WorkPlanService:
         now = datetime.now(timezone.utc)
         resolve_error: str | None = None
         arguments: dict[str, Any] = {}
+        cancel_before_step = False
         with self.database.session() as session:
             plan = session.get(WorkPlan, plan_id)
             step = session.get(WorkPlanStep, step_id)
             if plan is None or step is None:
                 raise RuntimeError("Work plan step disappeared")
-            step.status = "running"
-            step.started_at = now
+            if plan.status == "cancelling":
+                cancel_before_step = True
+            else:
+                step.status = "running"
+                step.started_at = now
             task_id = plan.task_id
             workspace_id = plan.workspace_id
             tool_name = step.tool_name
             execution_mode = step.execution_mode
             risk_level = step.risk_level
-            try:
-                arguments = self._resolve_arguments(session, step)
-            except Exception as exc:
-                resolve_error = f"{type(exc).__name__}: {exc}"[:4000]
-                step.status = "failed"
-                step.error_message = resolve_error
-                step.completed_at = datetime.now(timezone.utc)
+            if not cancel_before_step:
+                try:
+                    arguments = self._resolve_arguments(session, step)
+                except Exception as exc:
+                    resolve_error = f"{type(exc).__name__}: {exc}"[:4000]
+                    step.status = "failed"
+                    step.error_message = resolve_error
+                    step.completed_at = datetime.now(timezone.utc)
+
+        if cancel_before_step:
+            return
 
         if resolve_error is not None:
             self._fail_step(plan_id, step_id, run_id, resolve_error)
@@ -516,41 +667,56 @@ class WorkPlanService:
                 task = session.get(Task, task_id)
                 if plan_row is None or step is None:
                     raise RuntimeError("Work plan disappeared after proposal creation")
-                step.status = "awaiting_confirmation"
+                cancel_requested = plan_row.status == "cancelling"
+                step.status = "completed" if cancel_requested else "awaiting_confirmation"
+                step.completed_at = (
+                    datetime.now(timezone.utc) if cancel_requested else None
+                )
                 step.result_summary = summary
                 step.result_json = actual
                 step.tool_call_id = tool_call_id
                 step.external_entity_type = external_type
                 step.external_entity_id = str(actual["id"])
-                plan_row.status = "awaiting_confirmation"
-                plan_row.error_message = None
+                if not cancel_requested:
+                    plan_row.status = "awaiting_confirmation"
+                    plan_row.error_message = None
                 if task is not None:
-                    task.status = "awaiting_confirmation"
                     task.progress = self._task_progress(session, plan_id)
-                    task.error_message = (
-                        "Work plan paused at an existing file-transaction confirmation gate"
-                    )
+                    if not cancel_requested:
+                        task.status = "awaiting_confirmation"
+                        task.error_message = (
+                            "Work plan paused at an existing file-transaction confirmation gate"
+                        )
                 session.add(
                     AuditLog(
                         task_id=task_id,
                         agent_run_id=run_id,
-                        action="work_plan_waiting_confirmation",
+                        action=(
+                            "work_plan_step_completed_after_cancel_request"
+                            if cancel_requested
+                            else "work_plan_waiting_confirmation"
+                        ),
                         target=step_id,
                         result=(
                             f"tool={tool_name}; entity_type={external_type}; "
-                            f"entity_id={actual['id']}; automatic_file_mutation=false"
+                            f"entity_id={actual['id']}; automatic_file_mutation=false; "
+                            f"cancel_requested={str(cancel_requested).lower()}"
                         ),
                         risk_level=risk_level,
                     )
                 )
+            if cancel_requested:
+                return
             self._finish_run(run_id, "awaiting_confirmation")
             return
 
         with self.database.session() as session:
+            plan_row = session.get(WorkPlan, plan_id)
             step = session.get(WorkPlanStep, step_id)
             task = session.get(Task, task_id)
-            if step is None:
+            if plan_row is None or step is None:
                 raise RuntimeError("Work plan step disappeared after tool execution")
+            cancel_requested = plan_row.status == "cancelling"
             step.status = "completed"
             step.completed_at = datetime.now(timezone.utc)
             step.result_summary = summary
@@ -563,9 +729,16 @@ class WorkPlanService:
                 AuditLog(
                     task_id=task_id,
                     agent_run_id=run_id,
-                    action="work_plan_step_completed",
+                    action=(
+                        "work_plan_step_completed_after_cancel_request"
+                        if cancel_requested
+                        else "work_plan_step_completed"
+                    ),
                     target=step_id,
-                    result=f"position={step.position}; tool={tool_name}",
+                    result=(
+                        f"position={step.position}; tool={tool_name}; "
+                        f"cancel_requested={str(cancel_requested).lower()}"
+                    ),
                     risk_level=risk_level,
                 )
             )
@@ -831,15 +1004,18 @@ class WorkPlanService:
             plan = session.get(WorkPlan, plan_id)
             if plan is None:
                 raise ValueError("Work plan not found")
+            if plan.status not in {"running", "cancelling"}:
+                raise ValueError("Background runner no longer owns this work plan")
             task = session.get(Task, plan.task_id)
-            plan.status = "running"
             plan.started_at = plan.started_at or now
-            plan.error_message = None
+            if plan.status == "running":
+                plan.error_message = None
             if task is not None:
-                task.status = "running"
                 task.started_at = task.started_at or now
                 task.completed_at = None
-                task.error_message = None
+                if plan.status == "running":
+                    task.status = "running"
+                    task.error_message = None
             run = AgentRun(
                 task_id=plan.task_id,
                 model="work-plan-executor",
@@ -853,11 +1029,92 @@ class WorkPlanService:
                     agent_run_id=run.id,
                     action=event,
                     target=plan.id,
-                    result="Persistent work-plan execution started",
+                    result="Durable background work-plan execution started",
                     risk_level=0,
                 )
             )
             return run.id
+
+    def _queue_plan(self, plan_id: str, *, action: str, result: str) -> None:
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None:
+                raise ValueError("Work plan not found")
+            task = session.get(Task, plan.task_id)
+            plan.status = "queued"
+            plan.error_message = None
+            if task is not None:
+                task.status = "queued"
+                task.error_message = None
+                task.completed_at = None
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    action=action,
+                    target=plan.id,
+                    result=result,
+                    risk_level=0,
+                )
+            )
+
+    def _finalize_cancel(
+        self,
+        plan_id: str,
+        *,
+        run_id: str | None = None,
+        reason: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None or plan.status == "cancelled":
+                return
+            steps = list(
+                session.scalars(
+                    select(WorkPlanStep).where(WorkPlanStep.plan_id == plan_id)
+                ).all()
+            )
+            preserved: list[str] = []
+            for step in steps:
+                if step.external_entity_id:
+                    preserved.append(
+                        f"{step.external_entity_type}:{step.external_entity_id}"
+                    )
+                if step.status in {
+                    "pending",
+                    "awaiting_confirmation",
+                    "failed",
+                    "interrupted",
+                }:
+                    step.status = "cancelled"
+                    step.completed_at = step.completed_at or now
+            plan.status = "cancelled"
+            plan.cancelled_at = now
+            plan.completed_at = now
+            plan.error_message = None
+            task = session.get(Task, plan.task_id)
+            if task is not None:
+                task.status = "cancelled"
+                task.completed_at = now
+                task.error_message = None
+            if run_id:
+                run = session.get(AgentRun, run_id)
+                if run is not None:
+                    run.status = "cancelled"
+                    run.completed_at = now
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    agent_run_id=run_id,
+                    action="work_plan_cancelled",
+                    target=plan_id,
+                    result=(
+                        f"{reason}; preserved proposals="
+                        + (",".join(preserved) if preserved else "none")
+                    )[:4000],
+                    risk_level=0,
+                )
+            )
 
     def _complete(self, plan_id: str, run_id: str) -> None:
         now = datetime.now(timezone.utc)
