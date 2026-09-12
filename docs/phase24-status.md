@@ -54,7 +54,7 @@ The timeout is intentionally soft:
 - elapsed wall-clock duration is measured around the existing ToolRegistry call;
 - if the threshold is exceeded, the completed tool result is persisted;
 - for normal auto steps, the plan pauses before any later step starts;
-- for proposal-gate steps, the original file confirmation gate remains authoritative and the timeout is recorded as a warning.
+- for proposal-gate steps, the original file confirmation gate remains authoritative; after that confirmation completes, the plan enters `paused` before any later step can run, preserving the timeout stop condition for human review.
 
 This avoids converting a timeout into an ambiguous partially executed tool state.
 
