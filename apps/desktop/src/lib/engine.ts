@@ -447,6 +447,18 @@ export type FileRecycleBatchRecord = {
   items: FileRecycleRecord[];
 };
 
+export type WorkPlanEventRecord = {
+  id: string;
+  plan_id: string;
+  step_id: string | null;
+  event_type: string;
+  severity: "info" | "warning" | "action" | string;
+  message: string;
+  data: Record<string, unknown>;
+  created_at: string;
+  acknowledged_at: string | null;
+};
+
 export type WorkPlanStepRecord = {
   id: string;
   position: number;
@@ -461,7 +473,9 @@ export type WorkPlanStepRecord = {
     | "pending"
     | "running"
     | "awaiting_confirmation"
+    | "awaiting_step_approval"
     | "completed"
+    | "skipped"
     | "failed"
     | "interrupted"
     | "cancelled"
@@ -472,6 +486,11 @@ export type WorkPlanStepRecord = {
   external_entity_type: string | null;
   external_entity_id: string | null;
   error_message: string | null;
+  approved_at: string | null;
+  skipped_at: string | null;
+  skip_reason: string | null;
+  duration_seconds: number | null;
+  timeout_exceeded: boolean;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -488,8 +507,10 @@ export type WorkPlanRecord = {
     | "ready"
     | "queued"
     | "running"
+    | "pausing"
     | "cancelling"
     | "awaiting_confirmation"
+    | "awaiting_step_approval"
     | "completed"
     | "failed"
     | "blocked"
@@ -497,16 +518,42 @@ export type WorkPlanRecord = {
     | "cancelled"
     | string;
   error_message: string | null;
+  pause_reason: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
   cancelled_at: string | null;
+  paused_at: string | null;
   progress: number;
   requires_confirmation: boolean;
+  requires_step_approval: boolean;
   can_start: boolean;
   can_resume: boolean;
+  can_pause: boolean;
+  can_continue: boolean;
   can_retry: boolean;
   can_cancel: boolean;
+  supervision: {
+    max_auto_steps: number;
+    auto_steps_used: number;
+    auto_steps_remaining: number;
+    runtime_budget_seconds: number;
+    runtime_seconds_used: number;
+    runtime_seconds_remaining: number;
+    step_timeout_seconds: number;
+    failure_policy: "pause" | "stop" | string;
+    approval_risk_threshold: number;
+  };
+  estimate: {
+    total_steps: number;
+    completed_steps: number;
+    skipped_steps: number;
+    remaining_steps: number;
+    average_completed_step_seconds: number | null;
+    estimated_remaining_seconds: number | null;
+  };
+  unread_notifications: number;
+  latest_events: WorkPlanEventRecord[];
   steps: WorkPlanStepRecord[];
 };
 
@@ -542,6 +589,8 @@ export type WorkPlanWorkerStatus = {
   failed: number;
   blocked: number;
   awaiting_confirmation: number;
+  awaiting_step_approval: number;
+  paused: number;
   cancelled: number;
   last_plan_id: string | null;
   last_completed_at: string | null;
@@ -982,6 +1031,80 @@ export function cancelWorkPlan(planId: string): Promise<WorkPlanRecord> {
   return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/cancel`, {
     method: "POST",
   });
+}
+
+export function pauseWorkPlan(planId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/pause`, {
+    method: "POST",
+  });
+}
+
+export function continueWorkPlan(planId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/continue`, {
+    method: "POST",
+  });
+}
+
+export function approveWorkPlanStep(
+  planId: string,
+  stepId: string,
+): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(
+    `/work-plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}/approve`,
+    { method: "POST" },
+  );
+}
+
+export function skipWorkPlanStep(
+  planId: string,
+  stepId: string,
+  reason: string,
+): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(
+    `/work-plans/${encodeURIComponent(planId)}/steps/${encodeURIComponent(stepId)}/skip`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    },
+  );
+}
+
+export function updateWorkPlanSupervision(
+  planId: string,
+  settings: {
+    max_auto_steps?: number;
+    runtime_budget_seconds?: number;
+    step_timeout_seconds?: number;
+    failure_policy?: "pause" | "stop";
+    approval_risk_threshold?: number;
+  },
+): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(
+    `/work-plans/${encodeURIComponent(planId)}/supervision`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(settings),
+    },
+  );
+}
+
+export function listWorkPlanEvents(
+  planId: string,
+  unreadOnly = false,
+): Promise<WorkPlanEventRecord[]> {
+  return request<WorkPlanEventRecord[]>(
+    `/work-plans/${encodeURIComponent(planId)}/events?unread_only=${unreadOnly ? "true" : "false"}`,
+  );
+}
+
+export function acknowledgeWorkPlanEvent(
+  planId: string,
+  eventId: string,
+): Promise<WorkPlanEventRecord> {
+  return request<WorkPlanEventRecord>(
+    `/work-plans/${encodeURIComponent(planId)}/events/${encodeURIComponent(eventId)}/acknowledge`,
+    { method: "POST" },
+  );
 }
 
 export function getTask(taskId: string): Promise<TaskDetail> {
