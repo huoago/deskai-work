@@ -57,6 +57,7 @@ from app.source_edits.batch_service import SourceFileEditBatchService
 from app.source_edits.service import SourceFileEditService
 from app.web.service import WebResearchService
 from app.work_plans.service import WorkPlanService
+from app.work_plans.worker import WorkPlanWorker
 
 ALLOWED_DESKTOP_ORIGINS = [
     "http://127.0.0.1:1420",
@@ -197,6 +198,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.work_plan_service = work_plan_service
         work_plan_service.recover_interrupted()
+        work_plan_worker = WorkPlanWorker(
+            app.state.database,
+            work_plan_service,
+            interval_seconds=resolved.work_plan_worker_interval_seconds,
+        )
+        app.state.work_plan_worker = work_plan_worker
         agent_orchestrator = AgentOrchestrator(
             app.state.database,
             app.state.secret_store,
@@ -220,9 +227,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             memory_worker.start()
         if resolved.agent_worker_enabled:
             agent_worker.start()
+        if resolved.work_plan_worker_enabled:
+            work_plan_worker.start()
         try:
             yield
         finally:
+            work_plan_worker.stop()
             agent_worker.stop()
             memory_worker.stop()
             knowledge_indexer.stop()
