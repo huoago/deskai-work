@@ -11,7 +11,10 @@ ENGINE_ROOT = Path(__file__).resolve().parents[1]
 if str(ENGINE_ROOT) not in sys.path:
     sys.path.insert(0, str(ENGINE_ROOT))
 
-from app.evaluation.rag_benchmark import build_engineering_benchmark_v1, evaluate_retrieval
+from app.evaluation.rag_benchmark import (  # noqa: E402
+    build_engineering_benchmark_v1,
+    evaluate_retrieval,
+)
 
 
 def main() -> int:
