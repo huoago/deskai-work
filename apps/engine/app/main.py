@@ -79,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_token = resolved.session_token
         app.state.secret_store = SecretStore()
         app.state.openai_provider = OpenAIChatProvider()
-        embedding_service = EmbeddingService(app.state.database, app.state.secret_store)
+        embedding_service = EmbeddingService(app.state.database, app.state.secret_store, resolved.data_dir)
         app.state.embedding_service = embedding_service
         watcher = WorkspaceWatcher(
             app.state.database,

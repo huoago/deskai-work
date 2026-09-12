@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.knowledge.embedding import (
+    BGE_M3_DIMENSION,
+    BGE_M3_MODEL,
     EMBEDDING_DIMENSION,
     EMBEDDING_PROVIDER,
     EmbeddingError,
@@ -68,6 +70,15 @@ def test_phase27_settings_expose_embedding_provider(client):
     updated = client.patch(
         "/settings",
         json={
+            "embedding_provider": "local_bge_m3",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["embedding_provider"] == "local_bge_m3"
+
+    updated = client.patch(
+        "/settings",
+        json={
             "embedding_provider": "openai",
             "embedding_model": "text-embedding-3-large",
         },
@@ -75,6 +86,30 @@ def test_phase27_settings_expose_embedding_provider(client):
     assert updated.status_code == 200
     assert updated.json()["embedding_provider"] == "openai"
     assert updated.json()["embedding_model"] == "text-embedding-3-large"
+
+
+def test_phase27_local_model_status_is_explicit_and_does_not_auto_download(client):
+    response = client.get("/knowledge/embeddings/local-model")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["model"] == BGE_M3_MODEL
+    assert payload["installed"] is False
+    assert payload["download_required"] is True
+    assert payload["model_sha256"]
+    assert payload["tokenizer_sha256"]
+
+
+def test_phase27_local_bge_descriptor_is_semantic_without_forcing_model_load(client):
+    updated = client.patch("/settings", json={"embedding_provider": "local_bge_m3"})
+    assert updated.status_code == 200
+
+    response = client.get("/knowledge/status")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["embedding"]["provider"] == "local_bge_m3"
+    assert payload["embedding"]["model"] == BGE_M3_MODEL
+    assert payload["embedding"]["dimension"] == BGE_M3_DIMENSION
+    assert payload["embedding"]["semantic"] is True
 
 
 def test_phase27_knowledge_status_reports_vector_provider(client):
