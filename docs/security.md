@@ -573,3 +573,28 @@ Security invariants:
 - even a consistent snapshot returns `safe_to_retry_existing_action: false`;
 - Phase 19 cannot clear `recovery_required` and cannot call rollback/restore itself;
 - no overwrite, purge, ignore-SHA, force-repair or single-member batch repair capability is introduced.
+
+
+## Phase 20 — Controlled recovery state reconciliation
+
+Phase 20 introduces a metadata-only mutation, but does not introduce any new user-file mutation capability.
+
+Security invariants:
+
+- only a transaction already persisted as `recovery_required` may create a proposal;
+- Phase 20 only accepts Phase 19 `consistent_applied` with rollback readiness or `consistent_recycled` with restore readiness;
+- original/restored/mixed/ambiguous states cannot be reconciled by Phase 20;
+- proposal creation stores a stable snapshot fingerprint rather than a filesystem snapshot or user content;
+- confirmation requires a new Phase 19 snapshot and an identical canonical fingerprint;
+- any changed path/hash/size/member/evidence state marks the proposal stale;
+- stale proposals cannot be confirmed;
+- every proposal requires explicit second human confirmation;
+- reconciliation cannot be invoked by Agent tools;
+- source-edit reconciliation changes only edit/batch metadata;
+- organization reconciliation may align the DeskAI File record to the already-existing verified target path but performs no filesystem move;
+- recycle reconciliation may set the DeskAI File record to `recycled` but performs no filesystem removal or restore;
+- batch reconciliation checks exact membership and updates the whole batch in one database transaction;
+- batch members cannot be reconciled individually;
+- reconciliation never runs the historical rollback/restore action itself;
+- after reconciliation, the original Phase 11–16 rollback/restore endpoint remains the only path that can mutate files;
+- no force overwrite, ignore-SHA, arbitrary target status, purge, backup deletion, directory mutation, shell, unrestricted Python, or browser/GUI mutation is added.
