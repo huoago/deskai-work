@@ -625,7 +625,7 @@ class WorkPlanService:
             plans = list(
                 session.scalars(
                     select(WorkPlan).where(
-                        WorkPlan.status.in_(("running", "cancelling"))
+                        WorkPlan.status.in_(("running", "cancelling", "pausing"))
                     )
                 ).all()
             )
@@ -641,8 +641,11 @@ class WorkPlanService:
 
                 if running_steps:
                     plan.status = "paused"
+                    plan.paused_at = now
+                    plan.pause_reason = (
+                        "Engine stopped while a supervised work-plan tool was running"
+                    )
                     plan.error_message = (
-                        "Engine stopped while a work-plan tool was running. "
                         "That step was not replayed automatically; explicit retry is required."
                     )
                     for step in running_steps:
@@ -653,6 +656,14 @@ class WorkPlanService:
                     if task is not None:
                         task.status = "blocked"
                         task.error_message = plan.error_message
+                    self._event(
+                        session,
+                        plan,
+                        event_type="interrupted",
+                        severity="action",
+                        message=plan.error_message,
+                        data={"running_steps": [step.position for step in running_steps]},
+                    )
                     session.add(
                         AuditLog(
                             task_id=plan.task_id,
@@ -669,6 +680,7 @@ class WorkPlanService:
                         if step.status in {
                             "pending",
                             "awaiting_confirmation",
+                            "awaiting_step_approval",
                             "failed",
                             "interrupted",
                         }:
@@ -682,6 +694,14 @@ class WorkPlanService:
                         task.status = "cancelled"
                         task.completed_at = now
                         task.error_message = None
+                    self._event(
+                        session,
+                        plan,
+                        event_type="startup_cancelled",
+                        severity="info",
+                        message="Recovered cancellation request during Engine startup",
+                        data={},
+                    )
                     session.add(
                         AuditLog(
                             task_id=plan.task_id,
@@ -696,12 +716,52 @@ class WorkPlanService:
                     )
                     continue
 
+                if plan.status == "pausing":
+                    plan.status = "paused"
+                    plan.paused_at = now
+                    plan.pause_reason = plan.pause_reason or (
+                        "Recovered a pending pause request during Engine startup"
+                    )
+                    plan.error_message = plan.pause_reason
+                    if task is not None:
+                        task.status = "paused"
+                        task.error_message = plan.pause_reason
+                    self._event(
+                        session,
+                        plan,
+                        event_type="startup_paused",
+                        severity="info",
+                        message=plan.pause_reason,
+                        data={},
+                    )
+                    session.add(
+                        AuditLog(
+                            task_id=plan.task_id,
+                            action="work_plan_startup_paused",
+                            target=plan.id,
+                            result=plan.pause_reason,
+                            risk_level=0,
+                        )
+                    )
+                    continue
+
                 plan.status = "queued"
                 plan.error_message = None
                 if task is not None:
                     task.status = "queued"
                     task.error_message = None
                     task.completed_at = None
+                self._event(
+                    session,
+                    plan,
+                    event_type="startup_requeued",
+                    severity="info",
+                    message=(
+                        "Safe checkpoint recovered; completed results retained and "
+                        "remaining work requeued"
+                    ),
+                    data={},
+                )
                 session.add(
                     AuditLog(
                         task_id=plan.task_id,
