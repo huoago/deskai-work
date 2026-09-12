@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 17 are complete and merged to `main`. Phase 18 is implemented on its verification branch.**
+**Phase 0 through Phase 18 are complete, fully verified, and merged to `main`.**
 
 Implemented foundations:
 
@@ -88,7 +88,7 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 15 — Controlled recycle bin:** complete with proposal-only single-file recycle, verified private quarantine copy before source removal, post-copy source SHA revalidation, quarantine sandbox containment, recycled metadata state, restore-to-original with no-overwrite semantics, startup recovery, cross-tool mutation exclusivity, no permanent purge capability, 102 passing Engine tests, packaged Engine 0.15.0 smoke verification, and verified Windows installers.
 - **Phase 16 — Transactional batch recycle:** complete with 2–10 unique files, all-member preflight, all quarantine copies verified before the first Workspace original is removed, post-staging SHA revalidation, all-or-nothing recycle/restore rollback, startup recovery, unexpected-content recovery freeze, no permanent purge capability, 115 passing Engine tests, packaged Engine 0.16.0 smoke verification, and verified Windows installers.
 - **Phase 17 — Unified recovery center:** complete with read-only Workspace-scoped aggregation of Phase 11–16 applied/recycled/recovery-required transactions, desktop recoverable/attention/history filters, rollback/restore buttons that reuse the original transaction APIs, 120 passing Engine tests, packaged Engine 0.17.0 recovery smoke verification, and verified Windows installers.
-- **Phase 18 — Recovery diagnostics & guided repair:** implemented with deterministic classification of recovery_required states, structured evidence/confidence, guided manual verification steps, prohibited-action guardrails, no new mutation endpoint, and no automatic force repair. Full CI/Windows verification is recorded in `docs/phase18-status.md` after the feature PR completes.
+- **Phase 18 — Recovery diagnostics & guided repair:** complete with deterministic classification of recovery_required states, structured evidence/confidence, guided manual verification steps, prohibited-action guardrails, no new mutation endpoint, no automatic force repair, 125 passing Engine tests, packaged Engine 0.18.0 recovery smoke verification, and verified Windows NSIS/MSI installers.
 
 See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, and `docs/phase18-status.md` for the current implementation.
 
