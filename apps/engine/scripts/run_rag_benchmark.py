@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import httpx
+
+ENGINE_ROOT = Path(__file__).resolve().parents[1]
+if str(ENGINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(ENGINE_ROOT))
 
 from app.evaluation.rag_benchmark import build_engineering_benchmark_v1, evaluate_retrieval
 
