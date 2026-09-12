@@ -5,7 +5,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database.models import AuditLog, Task, WorkPlan
 
@@ -146,9 +146,22 @@ class WorkPlanWorker:
             )
             if plan is None:
                 return None
-            plan.status = "running"
-            plan.started_at = plan.started_at or now
-            plan.error_message = None
+            claimed = session.execute(
+                update(WorkPlan)
+                .where(
+                    WorkPlan.id == plan.id,
+                    WorkPlan.status == "queued",
+                )
+                .values(
+                    status="running",
+                    started_at=plan.started_at or now,
+                    error_message=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                return None
+            session.refresh(plan)
             task = session.get(Task, plan.task_id)
             if task is not None:
                 task.status = "running"
