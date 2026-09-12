@@ -1896,7 +1896,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onCreatePlan, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch, onStartWorkPlan, onResumeWorkPlan, onRetryWorkPlan, onCancelWorkPlan }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1905,6 +1905,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   setRequest: (value: string) => void;
   disabled: boolean;
   onCreate: () => void;
+  onCreatePlan: () => void;
   onSelect: (taskId: string) => void;
   onRetry: (taskId: string) => void;
   onProcess: () => void;
@@ -1926,9 +1927,14 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onConfirmRecycleBatch: (batchId: string, taskId: string) => void;
   onRejectRecycleBatch: (batchId: string, taskId: string) => void;
   onRestoreRecycleBatch: (batchId: string, taskId: string) => void;
+  onStartWorkPlan: (plan: WorkPlanRecord) => void;
+  onResumeWorkPlan: (plan: WorkPlanRecord) => void;
+  onRetryWorkPlan: (plan: WorkPlanRecord) => void;
+  onCancelWorkPlan: (plan: WorkPlanRecord) => void;
 }) {
-  const pending = tasks.filter((item) => item.status === "pending").length;
+  const pending = tasks.filter((item) => ["pending", "planning", "planned"].includes(item.status)).length;
   const running = tasks.filter((item) => item.status === "running").length;
+  const waitingConfirmation = tasks.filter((item) => item.status === "awaiting_confirmation").length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
   const edits = detail?.file_edits ?? [];
@@ -1946,6 +1952,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
       <div className="knowledge-status-grid">
         <Metric label="待执行" value={String(pending)} />
         <Metric label="执行中" value={String(running)} />
+        <Metric label="待人工确认" value={String(waitingConfirmation)} />
         <Metric label="已完成" value={String(completed)} />
         <Metric label="需处理" value={String(attention)} />
         <Metric label="Agent Worker" value={status?.running ? "运行中" : "未运行"} />
@@ -1954,8 +1961,8 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
       <article className="panel task-create-panel">
         <div className="panel-head">
           <div>
-            <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出编辑、文件整理、单文件回收及 2–10 文件事务化回收提案；所有源文件写入、路径变更和回收操作都必须由你确认。</p>
+            <h3>创建工作任务</h3>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。可继续使用即时 Agent，也可以先生成 Phase 22 多步骤计划。计划会持久化步骤、依赖、风险和执行结果；现有文件编辑/整理/回收仍只生成原 Phase 11–16 提案，并在人工确认门禁处暂停。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1969,8 +1976,11 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
           }}
         />
         <div className="task-submit-row">
-          <span>Ctrl/⌘ + Enter 创建任务</span>
-          <button className="primary" onClick={onCreate} disabled={disabled || !request.trim()}>交给 Agent</button>
+          <span>Ctrl/⌘ + Enter：即时 Agent</span>
+          <div className="button-row">
+            <button className="secondary" onClick={onCreatePlan} disabled={disabled || !request.trim()}>生成多步骤计划</button>
+            <button className="primary" onClick={onCreate} disabled={disabled || !request.trim()}>交给 Agent</button>
+          </div>
         </div>
       </article>
 
@@ -1986,7 +1996,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               >
                 <div>
                   <strong>{task.title}</strong>
-                  <span>{formatDate(task.created_at)}</span>
+                  <span>{task.execution_mode === "plan" ? "多步骤计划" : "即时 Agent"} · {formatDate(task.created_at)}</span>
                 </div>
                 <div className="task-row-status">
                   <span className={`task-status ${task.status}`}>{taskStatusLabel(task.status)}</span>
