@@ -1,6 +1,6 @@
 # Phase 19 — Recovery snapshot & safe recheck
 
-Status: implementation complete on the Phase 19 branch; full CI and Windows artifact verification pending.
+Status: complete, fully verified, and merged to `main`.
 
 ## Objective
 
@@ -23,7 +23,7 @@ Supported transaction families:
 - single recycle transactions;
 - recycle batches.
 
-The endpoint performs no database mutation.
+The endpoint performs no database mutation and exposes no POST/PATCH/DELETE recovery-snapshot surface.
 
 ## Snapshot evidence
 
@@ -32,7 +32,7 @@ For the transaction's already-known paths, the snapshot records:
 - path role;
 - current existence;
 - regular-file status;
-- symlink status;
+- symlink/link-component status;
 - current file size;
 - current SHA-256 when safe to calculate;
 - which persisted transaction hashes the current file matches;
@@ -57,9 +57,11 @@ Recycle rechecks:
 - private quarantine copy;
 - original hash and size.
 
-## Symlink boundary
+## Linked-path boundary
 
-If a transaction-known path is currently a symbolic link, Phase 19 reports it as a symlink and does not follow or hash the link target.
+Before hashing a transaction-known path, Phase 19 checks the path chain from its parents to the final component.
+
+If any component is a symbolic link or Windows junction, the snapshot reports the linked component and stops. It does not continue through the linked directory and does not hash the eventual target.
 
 This prevents the diagnostic surface from becoming an arbitrary path-reading mechanism after an external filesystem change.
 
@@ -102,7 +104,7 @@ The snapshot includes up to 25 recent AuditLog records for the originating Task 
 
 ## Desktop UI
 
-Each `recovery_required` card now exposes **重新检测磁盘状态**.
+Each `recovery_required` card exposes **重新检测磁盘状态**.
 
 The result shows:
 
@@ -129,12 +131,12 @@ Phase 19 does not add:
 - target overwrite;
 - batch-member-only repair;
 - arbitrary path input;
-- symlink following;
+- symlink/junction following;
 - snapshot persistence.
 
 Only the original Phase 11–16 transaction services may mutate files.
 
-## Verification targets
+## Verification matrix
 
 Phase 19 tests cover:
 
@@ -145,6 +147,41 @@ Phase 19 tests cover:
 - mixed-state transactional batch detection;
 - refusal to snapshot non-recovery transactions;
 - read-only GET-only API surface;
-- packaged Engine 0.19.0 exposure of the recovery snapshot route.
+- parent symlink non-following;
+- packaged Engine route exposure.
 
-The final test count, CI run, Windows installers, Artifact id/hash, PR number and merge SHA are recorded here after verification completes.
+### Feature verification
+
+Feature PR #33 passed the complete CI pipeline on Run #96 before merge:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **131 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.19.0** health smoke — passed;
+- packaged `/recovery` API smoke — passed;
+- packaged Recovery Snapshot OpenAPI route smoke — passed;
+- Tauri Windows NSIS build — passed;
+- Tauri Windows MSI build — passed;
+- Windows Artifact upload — passed.
+
+Verified Windows installers:
+
+- `DeskAI Work_0.1.0_x64-setup.exe`;
+- `DeskAI Work_0.1.0_x64_en-US.msi`.
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10287573018`;
+- size: `394399005` bytes;
+- SHA-256: `541da4838c97de6c55155ce260a4c9b9067f370f1fef22e5b821405fc4261b54`.
+
+Feature PR #33 was squash merged to `main` as:
+
+`158834a7ff6b1f0eaf7dc52e9965939f5e0de684`
+
+CI Run #96:
+
+`34661769005`
