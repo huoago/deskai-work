@@ -139,6 +139,17 @@ class WorkPlanService:
             task.status = "planned"
             task.progress = 0.08
             task.error_message = None
+            self._event(
+                session,
+                plan,
+                event_type="drafted",
+                severity="info",
+                message=f"Work plan drafted with {len(normalized['steps'])} steps",
+                data={
+                    "steps": len(normalized["steps"]),
+                    "max_risk": max(item["risk_level"] for item in normalized["steps"]),
+                },
+            )
             session.add(
                 AuditLog(
                     task_id=task_id,
@@ -202,6 +213,19 @@ class WorkPlanService:
                     task.status = "queued"
                     task.error_message = None
                     task.completed_at = None
+                self._event(
+                    session,
+                    plan_row,
+                    step_id=step.id,
+                    event_type="file_confirmation_observed",
+                    severity="info",
+                    message=f"Original file confirmation completed with status {state}",
+                    data={
+                        "entity_type": step.external_entity_type,
+                        "entity_id": step.external_entity_id,
+                        "status": state,
+                    },
+                )
                 session.add(
                     AuditLog(
                         task_id=plan.task_id,
@@ -270,6 +294,16 @@ class WorkPlanService:
                 task.status = "queued"
                 task.error_message = None
                 task.completed_at = None
+            if plan_row is not None:
+                self._event(
+                    session,
+                    plan_row,
+                    step_id=step.id,
+                    event_type="retry_queued",
+                    severity="info",
+                    message=f"Step {step.position} reset and requeued for explicit retry",
+                    data={"tool_name": step.tool_name},
+                )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
@@ -838,6 +872,14 @@ class WorkPlanService:
             for run in runs:
                 run.status = "interrupted"
                 run.completed_at = now
+            self._event(
+                session,
+                plan,
+                event_type="worker_failed",
+                severity="action",
+                message=plan.error_message,
+                data={"error": message},
+            )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
@@ -1831,6 +1873,14 @@ class WorkPlanService:
                 if run is not None:
                     run.status = "cancelled"
                     run.completed_at = now
+            self._event(
+                session,
+                plan,
+                event_type="cancelled",
+                severity="action",
+                message=reason,
+                data={"preserved_proposals": preserved},
+            )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
@@ -2003,6 +2053,15 @@ class WorkPlanService:
                 task.status = "blocked"
                 task.error_message = message[:4000]
                 task.completed_at = now
+            self._event(
+                session,
+                plan,
+                step_id=step.id,
+                event_type="file_gate_blocked",
+                severity="action",
+                message=message[:4000],
+                data={},
+            )
             session.add(
                 AuditLog(
                     task_id=plan.task_id,
