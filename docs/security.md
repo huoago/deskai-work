@@ -598,3 +598,21 @@ Security invariants:
 - reconciliation never runs the historical rollback/restore action itself;
 - after reconciliation, the original Phase 11–16 rollback/restore endpoint remains the only path that can mutate files;
 - no force overwrite, ignore-SHA, arbitrary target status, purge, backup deletion, directory mutation, shell, unrestricted Python, or browser/GUI mutation is added.
+
+## Phase 21 — Recovery evidence export and incident packages
+
+Phase 21 adds a support/audit export channel, not a recovery mutation channel.
+
+Security invariants:
+
+- exports are limited to transactions already visible in Recovery Center;
+- transactional batch members cannot be exported independently;
+- the output path is generated inside DeskAI's existing GeneratedArtifact sandbox and cannot be supplied by the caller;
+- ZIP packages contain transaction metadata, diagnostics, filesystem observations, hashes, reconciliation history and audit events only;
+- Workspace file bytes, staged candidate bytes, automatic backup bytes and recycle quarantine bytes are never embedded;
+- a live Phase 19 snapshot is captured only while the transaction is still recovery_required;
+- exporting a package does not change transaction status, reconciliation status, Workspace File metadata, root permissions, backups or quarantine copies;
+- no rollback, restore, reconciliation confirmation, force overwrite, ignore-SHA, purge or arbitrary filesystem operation is performed;
+- Phase 21 exposes no Agent tool for evidence export;
+- the generated ZIP itself is SHA-256 recorded as a GeneratedArtifact and the package manifest hashes every internal evidence member.
+
