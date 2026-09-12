@@ -13,6 +13,19 @@ Phase 20 adds a narrowly-scoped metadata reconciliation path for the two states 
 
 Phase 20 does **not** reconcile original/restored/mixed/ambiguous states.
 
+## API surface
+
+Proposal creation uses the disambiguated static route:
+
+`POST /recovery-reconciliations/transactions/{entity_type}/{transaction_id}`
+
+Confirmation/rejection remain proposal-id routes:
+
+- `POST /recovery-reconciliations/{proposal_id}/confirm`
+- `POST /recovery-reconciliations/{proposal_id}/reject`
+
+This prevents dynamic transaction-route matching from intercepting proposal confirmation paths.
+
 ## Two-step proposal flow
 
 Reconciliation is never a one-click state override.
