@@ -9,6 +9,7 @@ import {
   confirmFileOrganizationBatch,
   confirmRecycleProposal,
   confirmRecycleBatch,
+  confirmRecoveryReconciliation,
   createMemory,
   createTask,
   createWorkspace,
@@ -38,6 +39,8 @@ import {
   processKnowledgeQueue,
   processMemoryQueue,
   processParserQueue,
+  proposeRecoveryReconciliation,
+  rejectRecoveryReconciliation,
   rejectSourceFileEdit,
   rejectSourceFileEditBatch,
   rejectFileOrganization,
@@ -77,6 +80,7 @@ import {
   type ParsedPreview,
   type ParserStatus,
   type RecoveryEntry,
+  type RecoveryReconciliationProposal,
   type RecoverySnapshot,
   type SearchHit,
   type TaskDetail,
@@ -989,6 +993,52 @@ export default function App() {
     return getRecoverySnapshot(entry.entity_type, entry.id);
   }
 
+  async function onProposeRecoveryReconciliation(
+    entry: RecoveryEntry,
+  ): Promise<RecoveryReconciliationProposal> {
+    return proposeRecoveryReconciliation(entry.entity_type, entry.id);
+  }
+
+  async function onConfirmRecoveryReconciliation(
+    proposal: RecoveryReconciliationProposal,
+  ): Promise<RecoveryReconciliationProposal> {
+    setBusy(true);
+    setNotice("");
+    try {
+      const confirmed = await confirmRecoveryReconciliation(proposal.id);
+      await refreshWorkspaceData();
+      if (proposal.task_id && taskDetail?.id === proposal.task_id) {
+        setTaskDetail(await getTask(proposal.task_id));
+      }
+      setNotice(
+        `状态核对已确认：事务元数据已恢复为 ${confirmed.target_status}；未修改任何用户文件。现在可重新使用原 ${confirmed.historical_action === "rollback" ? "rollback" : "restore"} 安全流程。`,
+      );
+      return confirmed;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "状态核对确认失败");
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRejectRecoveryReconciliation(
+    proposal: RecoveryReconciliationProposal,
+  ): Promise<RecoveryReconciliationProposal> {
+    setBusy(true);
+    setNotice("");
+    try {
+      const rejected = await rejectRecoveryReconciliation(proposal.id);
+      setNotice("状态核对提案已拒绝；原 recovery_required 冻结保持不变。");
+      return rejected;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拒绝状态核对提案失败");
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1218,6 +1268,9 @@ export default function App() {
             disabled={!online || busy}
             onRecover={onRecoverEntry}
             onSnapshot={onCaptureRecoverySnapshot}
+            onProposeReconciliation={onProposeRecoveryReconciliation}
+            onConfirmReconciliation={onConfirmRecoveryReconciliation}
+            onRejectReconciliation={onRejectRecoveryReconciliation}
             onOpenTask={(taskId) => {
               setPage("tasks");
               void onSelectTask(taskId);
@@ -1298,7 +1351,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 19 · AI + 文件事务 + 恢复快照</span>
+          <span className="phase-chip">Phase 20 · AI + 文件事务 + 受控恢复解冻</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -2243,18 +2296,27 @@ function RecoveryPage({
   disabled,
   onRecover,
   onSnapshot,
+  onProposeReconciliation,
+  onConfirmReconciliation,
+  onRejectReconciliation,
   onOpenTask,
 }: {
   entries: RecoveryEntry[];
   disabled: boolean;
   onRecover: (entry: RecoveryEntry) => void;
   onSnapshot: (entry: RecoveryEntry) => Promise<RecoverySnapshot>;
+  onProposeReconciliation: (entry: RecoveryEntry) => Promise<RecoveryReconciliationProposal>;
+  onConfirmReconciliation: (proposal: RecoveryReconciliationProposal) => Promise<RecoveryReconciliationProposal>;
+  onRejectReconciliation: (proposal: RecoveryReconciliationProposal) => Promise<RecoveryReconciliationProposal>;
   onOpenTask: (taskId: string) => void;
 }) {
   const [filter, setFilter] = useState<"recoverable" | "attention" | "history" | "all">("recoverable");
   const [snapshots, setSnapshots] = useState<Record<string, RecoverySnapshot>>({});
   const [snapshotErrors, setSnapshotErrors] = useState<Record<string, string>>({});
   const [snapshotLoading, setSnapshotLoading] = useState<string | null>(null);
+  const [reconciliations, setReconciliations] = useState<Record<string, RecoveryReconciliationProposal>>({});
+  const [reconciliationErrors, setReconciliationErrors] = useState<Record<string, string>>({});
+  const [reconciliationLoading, setReconciliationLoading] = useState<string | null>(null);
 
   async function refreshSnapshot(entry: RecoveryEntry) {
     const key = recoverySnapshotKey(entry);
@@ -2272,6 +2334,72 @@ function RecoveryPage({
       setSnapshotLoading((current) => (current === key ? null : current));
     }
   }
+  async function createReconciliation(entry: RecoveryEntry) {
+    const key = recoverySnapshotKey(entry);
+    setReconciliationLoading(key);
+    setReconciliationErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      const proposal = await onProposeReconciliation(entry);
+      setReconciliations((current) => ({ ...current, [key]: proposal }));
+    } catch (error) {
+      setReconciliationErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "生成状态核对提案失败",
+      }));
+    } finally {
+      setReconciliationLoading((current) => (current === key ? null : current));
+    }
+  }
+
+  async function confirmReconciliation(
+    entry: RecoveryEntry,
+    proposal: RecoveryReconciliationProposal,
+  ) {
+    const key = recoverySnapshotKey(entry);
+    const actionLabel = proposal.historical_action === "rollback" ? "回滚" : "恢复";
+    if (!window.confirm(
+      `确认将事务元数据从 recovery_required 修正为 ${proposal.target_status} 吗？DeskAI 会重新计算当前磁盘快照并校验指纹；不会修改用户文件。确认后只会重新开放原有“${actionLabel}”安全流程。`,
+    )) return;
+
+    setReconciliationLoading(key);
+    setReconciliationErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      const confirmed = await onConfirmReconciliation(proposal);
+      setReconciliations((current) => ({ ...current, [key]: confirmed }));
+    } catch (error) {
+      setReconciliations((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      setReconciliationErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "状态核对确认失败",
+      }));
+    } finally {
+      setReconciliationLoading((current) => (current === key ? null : current));
+    }
+  }
+
+  async function rejectReconciliation(
+    entry: RecoveryEntry,
+    proposal: RecoveryReconciliationProposal,
+  ) {
+    const key = recoverySnapshotKey(entry);
+    setReconciliationLoading(key);
+    try {
+      const rejected = await onRejectReconciliation(proposal);
+      setReconciliations((current) => ({ ...current, [key]: rejected }));
+    } catch (error) {
+      setReconciliationErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "拒绝状态核对提案失败",
+      }));
+    } finally {
+      setReconciliationLoading((current) => (current === key ? null : current));
+    }
+  }
+
   const recoverable = entries.filter((item) => item.action !== null);
   const attention = entries.filter((item) => item.recovery_required);
   const history = entries.filter((item) => item.action === null && !item.recovery_required);
@@ -2297,7 +2425,7 @@ function RecoveryPage({
         <div className="panel-head recovery-head">
           <div>
             <h3>统一恢复中心</h3>
-            <p className="muted small">集中查看 Phase 11–18 的文件事务。Phase 19 可按需生成 recovery_required 的只读磁盘快照，重新核对当前路径、SHA-256、备份/隔离副本和批次一致性；快照不会写数据库，也不会解除恢复冻结。</p>
+            <p className="muted small">集中查看 Phase 11–19 的文件事务。Phase 20 只在最新恢复快照证明磁盘完整处于 applied/recycled 且历史 rollback/restore 所需证据齐全时，允许生成状态核对提案；必须二次确认且只修正元数据，不修改用户文件。</p>
           </div>
           <div className="recovery-filters">
             {([
@@ -2405,8 +2533,21 @@ function RecoveryPage({
                   {snapshots[recoverySnapshotKey(entry)] && (
                     <RecoverySnapshotPanel snapshot={snapshots[recoverySnapshotKey(entry)]} />
                   )}
+                  {snapshots[recoverySnapshotKey(entry)] && recoverySnapshotSupportsReconciliation(snapshots[recoverySnapshotKey(entry)]) && (
+                    <RecoveryReconciliationPanel
+                      proposal={reconciliations[recoverySnapshotKey(entry)]}
+                      busy={disabled || reconciliationLoading === recoverySnapshotKey(entry)}
+                      error={reconciliationErrors[recoverySnapshotKey(entry)]}
+                      onCreate={() => void createReconciliation(entry)}
+                      onConfirm={(proposal) => void confirmReconciliation(entry, proposal)}
+                      onReject={(proposal) => void rejectReconciliation(entry, proposal)}
+                    />
+                  )}
+                  {snapshots[recoverySnapshotKey(entry)] && !recoverySnapshotSupportsReconciliation(snapshots[recoverySnapshotKey(entry)]) && (
+                    <p className="muted small">Phase 20 不会解冻当前快照：仅 consistent_applied + rollback 或 consistent_recycled + restore 可进入受控状态核对。</p>
+                  )}
                   <div className="recovery-attention-row">
-                    <span className="muted small">自动恢复仍处于冻结状态。即使快照检测到一致磁盘态，也必须先完成受控的事务状态核对，Phase 19 不会自行重试原恢复动作。</span>
+                    <span className="muted small">自动恢复仍处于冻结状态。Phase 20 只有在快照指纹二次复核完全一致后，才允许把元数据接回原 rollback/restore 状态机；不会自动执行文件恢复动作。</span>
                     {entry.task_id && <button className="secondary" onClick={() => onOpenTask(entry.task_id!)}>查看对应 Task</button>}
                   </div>
                 </>
@@ -2547,6 +2688,85 @@ function recoveryObservationRoleLabel(role: string) {
     quarantine_copy: "私有隔离副本",
   };
   return labels[role] ?? role;
+}
+
+function recoverySnapshotSupportsReconciliation(snapshot: RecoverySnapshot) {
+  const assessment = snapshot.assessment;
+  return (
+    assessment.safe_state_detected
+    && assessment.technical_action_preconditions_satisfied
+    && (
+      (assessment.state === "consistent_applied" && assessment.action_after_reconciliation === "rollback")
+      || (assessment.state === "consistent_recycled" && assessment.action_after_reconciliation === "restore")
+    )
+  );
+}
+
+function RecoveryReconciliationPanel({
+  proposal,
+  busy,
+  error,
+  onCreate,
+  onConfirm,
+  onReject,
+}: {
+  proposal?: RecoveryReconciliationProposal;
+  busy: boolean;
+  error?: string;
+  onCreate: () => void;
+  onConfirm: (proposal: RecoveryReconciliationProposal) => void;
+  onReject: (proposal: RecoveryReconciliationProposal) => void;
+}) {
+  return (
+    <div className="recovery-reconciliation">
+      <div className="recovery-reconciliation-head">
+        <div>
+          <span className="eyebrow">Phase 20 · 受控状态核对</span>
+          <strong>只修正事务元数据，不修改用户文件</strong>
+        </div>
+        <span className="risk-badge">二次人工确认</span>
+      </div>
+      {!proposal && (
+        <>
+          <p className="muted small">当前快照满足 Phase 20 门禁。生成提案后会固定快照指纹、目标状态和历史动作；确认时必须重新采集并完全匹配。</p>
+          <button className="secondary" disabled={busy} onClick={onCreate}>
+            {busy ? "生成中…" : "生成状态核对提案"}
+          </button>
+        </>
+      )}
+      {proposal && (
+        <div className="recovery-reconciliation-proposal">
+          <div className="recovery-snapshot-summary">
+            <span>提案状态：<b>{proposal.status}</b></span>
+            <span>目标状态：<b>{proposal.target_status}</b></span>
+            <span>重新开放：<b>{proposal.historical_action === "rollback" ? "原 rollback" : "原 restore"}</b></span>
+          </div>
+          <code className="recovery-path">Snapshot fingerprint: {proposal.snapshot_fingerprint}</code>
+          {proposal.status === "pending" && (
+            <div className="button-row">
+              <button className="primary" disabled={busy} onClick={() => onConfirm(proposal)}>
+                {busy ? "复核中…" : "二次确认并解除事务冻结"}
+              </button>
+              <button className="secondary" disabled={busy} onClick={() => onReject(proposal)}>
+                拒绝提案
+              </button>
+            </div>
+          )}
+          {proposal.status === "confirmed" && (
+            <p className="muted small">状态核对已确认。Recovery Center 刷新后将只通过原 Phase 11–16 rollback/restore API 执行后续文件动作。</p>
+          )}
+          {proposal.status === "rejected" && (
+            <p className="muted small">提案已拒绝，recovery_required 冻结保持不变。</p>
+          )}
+          {proposal.status === "stale" && (
+            <p className="provider-error">快照已变化，此提案不可确认；请重新检测磁盘状态并生成新提案。</p>
+          )}
+        </div>
+      )}
+      {error && <div className="provider-error">{error}</div>}
+      <p className="muted small">禁止：force overwrite、ignore SHA、自动恢复、修改用户文件、删除备份/隔离副本、拆分批次。</p>
+    </div>
+  );
 }
 
 function recoveryKindLabel(kind: string) {
@@ -2821,7 +3041,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 19</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 20</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -2849,6 +3069,8 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 18 对 recovery_required 仅提供基于持久化事务证据的诊断、核对顺序与禁止操作，不执行自动修复</p>
           <p><b>✓</b> recovery_required 不提供强制覆盖、忽略 SHA、删除备份/隔离副本或拆分批次的“修复”按钮</p>
           <p><b>✓</b> Phase 19 恢复快照只在人工点击时读取事务已知路径；符号链接不会跟随，检测结果不写数据库、不解除冻结</p>
+          <p><b>✓</b> Phase 20 仅允许 verified applied/recycled 快照生成元数据核对提案；确认时必须重新匹配完整快照指纹</p>
+          <p><b>✓</b> Phase 20 解冻只修正事务/File 元数据，绝不修改用户文件；文件动作仍只能走原 rollback/restore 安全 API</p>
         </div>
       </article>
     </section>
