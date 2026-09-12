@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 21 are complete, fully verified, and merged to `main`.**
+**Phase 0 through Phase 21 are complete, fully verified, and merged to `main`. Phase 22 is implemented on its verification branch.**
 
 Implemented foundations:
 
@@ -93,8 +93,9 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 19 — Recovery snapshot & safe recheck:** complete with an on-demand read-only snapshot endpoint for recovery_required transactions, current path existence/size/SHA inspection, source-edit backup/candidate verification, recycle quarantine verification, organization source/target reconciliation, batch consistency assessment, audit timeline evidence, symlink/junction-component non-following, no automatic transaction-state mutation, 131 passing Engine tests, packaged Engine 0.19.0 snapshot-route smoke verification, and verified Windows NSIS/MSI installers.
 - **Phase 20 — Controlled recovery state reconciliation:** complete with persisted two-step reconciliation proposals, canonical recovery-snapshot fingerprints, confirmation-time rechecks, stale-proposal invalidation, metadata-only unfreezing to applied/recycled, atomic batch reconciliation, audit records, no user-file mutation, 139 passing Engine tests, packaged Engine 0.20.0 reconciliation smoke verification, and verified Windows NSIS/MSI installers.
 - **Phase 21 — Recovery evidence export & incident package:** complete with metadata-only ZIP evidence bundles, Phase 18 diagnostics, live Phase 19 snapshots for frozen transactions, Phase 20 reconciliation history, Task audit timelines, per-file package integrity hashes, GeneratedArtifact sandbox output, no Workspace file bytes, no user-file mutation, 143 passing Engine tests, packaged Engine 0.21.0 evidence-route smoke verification, and verified Windows NSIS/MSI installers.
+- **Phase 22 — Controlled multi-step work plans:** implemented with plan-mode Tasks, persistent WorkPlan/WorkPlanStep state, dependency-aware execution, locally recomputed tool risk, structured dependency-result references, explicit start/resume/retry/cancel controls, proposal-gate pauses that reuse the original Phase 11–16 confirmations, interruption freeze without automatic replay, and full ToolCall/AuditLog reuse. Full CI/Windows verification is recorded in `docs/phase22-status.md` after the feature PR completes.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, `docs/phase18-status.md`, `docs/phase19-status.md`, `docs/phase20-status.md`, and `docs/phase21-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, `docs/phase18-status.md`, `docs/phase19-status.md`, `docs/phase20-status.md`, `docs/phase21-status.md`, and `docs/phase22-status.md` for the current implementation.
 
 ## Repository layout
 
