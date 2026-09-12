@@ -14,6 +14,7 @@ import "./phase12.css";
 import "./phase13.css";
 import "./phase15.css";
 import "./phase17.css";
+import "./phase18.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

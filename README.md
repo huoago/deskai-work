@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 17 are complete, fully verified, and merged to `main`.**
+**Phase 0 through Phase 17 are complete and merged to `main`. Phase 18 is implemented on its verification branch.**
 
 Implemented foundations:
 
@@ -63,9 +63,10 @@ Implemented foundations:
 - 2–10 file transactional recycle batches with all-member quarantine staging, all-or-nothing removal, rollback, and startup recovery
 - no permanent recycle purge/delete endpoint in Phase 15/16
 - unified read-only recovery aggregation across Phase 11–16 transactions with desktop rollback/restore controls that reuse the original safety APIs
+- structured recovery diagnostics for recovery_required transactions with evidence, confidence, guided manual checks, and explicit prohibited actions
 - Windows CI that verifies engine tests, frontend type/build, packaged sidecar health, and native NSIS/MSI output
 
-DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, stage coordinated 2–10 file all-or-nothing edit transactions, stage confirmed single-file rename/move operations inside one authorized writable Workspace root, stage 2–10 file all-or-nothing organization transactions, stage recoverable file recycle proposals, stage 2–10 file all-or-nothing recycle transactions, and centrally review/recover previously applied transactions from one Recovery Center. Source content or paths are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, no-overwrite rules, rollback safeguards, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, permanent file deletion/purge, directory operations, cross-root moves, target overwrite, or unattended destructive file operations.
+DeskAI can now generate grounded model answers, maintain durable long-term memory, execute audited Agent tasks, create new Word/Excel work artifacts, perform deterministic local calculations and CSV/XLSX analysis, conduct source-preserving public web research, stage confirmed edits to existing TXT/MD/DOCX/XLSX files, stage coordinated 2–10 file all-or-nothing edit transactions, stage confirmed single-file rename/move operations inside one authorized writable Workspace root, stage 2–10 file all-or-nothing organization transactions, stage recoverable file recycle proposals, stage 2–10 file all-or-nothing recycle transactions, centrally review/recover previously applied transactions from one Recovery Center, and diagnose recovery_required states without weakening the original transaction safety gates. Source content or paths are changed only after explicit desktop confirmation with write permission, SHA-256 revalidation, lock checks, no-overwrite rules, rollback safeguards, and audit. It still does **not** claim neural semantic embeddings, local LLM execution, arbitrary Python/shell execution, arbitrary URL fetching/downloading, GUI/browser control, permanent file deletion/purge, directory operations, cross-root moves, target overwrite, or unattended destructive file operations.
 
 ## V1 phase boundaries
 
@@ -87,8 +88,9 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 15 — Controlled recycle bin:** complete with proposal-only single-file recycle, verified private quarantine copy before source removal, post-copy source SHA revalidation, quarantine sandbox containment, recycled metadata state, restore-to-original with no-overwrite semantics, startup recovery, cross-tool mutation exclusivity, no permanent purge capability, 102 passing Engine tests, packaged Engine 0.15.0 smoke verification, and verified Windows installers.
 - **Phase 16 — Transactional batch recycle:** complete with 2–10 unique files, all-member preflight, all quarantine copies verified before the first Workspace original is removed, post-staging SHA revalidation, all-or-nothing recycle/restore rollback, startup recovery, unexpected-content recovery freeze, no permanent purge capability, 115 passing Engine tests, packaged Engine 0.16.0 smoke verification, and verified Windows installers.
 - **Phase 17 — Unified recovery center:** complete with read-only Workspace-scoped aggregation of Phase 11–16 applied/recycled/recovery-required transactions, desktop recoverable/attention/history filters, rollback/restore buttons that reuse the original transaction APIs, 120 passing Engine tests, packaged Engine 0.17.0 recovery smoke verification, and verified Windows installers.
+- **Phase 18 — Recovery diagnostics & guided repair:** implemented with deterministic classification of recovery_required states, structured evidence/confidence, guided manual verification steps, prohibited-action guardrails, no new mutation endpoint, and no automatic force repair. Full CI/Windows verification is recorded in `docs/phase18-status.md` after the feature PR completes.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, and `docs/phase17-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, and `docs/phase18-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -166,5 +168,6 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Every Agent tool attempt is persisted as ToolCall/AuditLog before it can be represented as completed work.
 - Unknown or destructive tool names are denied by default.
 - Phase 13/14 provide confirmed same-root rename/move only. Phase 15 adds recoverable recycle-to-quarantine for one file after explicit confirmation; permanent purge, directory operations, cross-root moves, extension changes, target overwrite, and arbitrary destination writes remain unavailable.
+- Phase 18 recovery diagnostics are read-only derivations from persisted transaction state. They never alter files, backups, quarantine copies, hashes, Workspace permissions, or transaction status.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.

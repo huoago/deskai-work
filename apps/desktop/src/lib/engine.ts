@@ -470,6 +470,18 @@ export type ActivityRecord = {
   risk_level: number;
 };
 
+export type RecoveryDiagnostic = {
+  code: string;
+  severity: "blocked" | string;
+  confidence: "high" | "medium" | "low" | string;
+  title: string;
+  summary: string;
+  evidence: string[];
+  guided_checks: string[];
+  prohibited_actions: string[];
+  automatic_repair_available: boolean;
+};
+
 export type RecoveryEntry = {
   id: string;
   entity_type:
@@ -494,6 +506,7 @@ export type RecoveryEntry = {
   action: "rollback" | "restore" | null;
   recovery_required: boolean;
   transactional: boolean;
+  diagnostic: RecoveryDiagnostic | null;
 };
 
 export type DesktopSettings = {
