@@ -38,7 +38,7 @@ def get_recovery_reconciliation(
         _raise_api_error(exc)
 
 
-@router.post("/recovery-reconciliations/{entity_type}/{transaction_id}")
+@router.post("/recovery-reconciliations/transactions/{entity_type}/{transaction_id}")
 def propose_recovery_reconciliation(
     entity_type: str,
     transaction_id: str,
