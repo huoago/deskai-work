@@ -291,6 +291,8 @@ class WorkPlanService:
             if plan_row is not None:
                 plan_row.status = "queued"
                 plan_row.error_message = None
+                plan_row.pause_reason = None
+                plan_row.paused_at = None
             if task is not None:
                 task.status = "queued"
                 task.error_message = None
@@ -854,6 +856,10 @@ class WorkPlanService:
                         "Background worker failed before DeskAI could prove tool completion"
                     )
             plan.status = "paused"
+            plan.paused_at = now
+            plan.pause_reason = (
+                "Background work-plan runner failed; explicit Retry is required"
+            )
             plan.error_message = (
                 "Background work-plan runner failed. The current step was not replayed."
             )
