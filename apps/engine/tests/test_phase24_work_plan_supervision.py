@@ -342,11 +342,14 @@ def test_phase24_skip_wins_if_supervisor_changes_selected_step_before_execution(
 
     def skip_before_claim(plan_id, selected_step_id, run_id):
         if not skipped["done"]:
-            response = client.post(
-                f"/work-plans/{plan_id}/steps/{selected_step_id}/skip",
-                json={"reason": "Supervisor skipped after selection but before tool claim"},
+            payload = service.skip_step(
+                plan_id,
+                selected_step_id,
+                reason="Supervisor skipped after selection but before tool claim",
             )
-            assert response.status_code == 200
+            assert next(
+                item for item in payload["steps"] if item["id"] == selected_step_id
+            )["status"] == "skipped"
             skipped["done"] = True
         return original_execute_step(plan_id, selected_step_id, run_id)
 
