@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from app import __version__
+from app.api.update_check import router as update_check_router
 
 router = APIRouter(tags=["system"])
 
@@ -18,3 +19,6 @@ def health(request: Request) -> dict[str, str]:
         "database": "ok" if db_ok else "error",
         "database_path": str(database.database_path),
     }
+
+
+router.include_router(update_check_router)
