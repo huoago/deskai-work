@@ -3,12 +3,15 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+
 from app.database.models import (
     FileOrganizationProposal,
     FileRecycleProposal,
     SourceEditBatch,
     SourceFileEdit,
 )
+from app.recovery.snapshot import RecoverySnapshotService
 
 
 def _workspace_with_files(client, tmp_path: Path, names: list[str]):
@@ -313,3 +316,28 @@ def test_phase19_snapshot_is_read_only_and_recovery_only(client, tmp_path):
         client.get(f"/recovery/unknown/{proposal['id']}/snapshot").status_code
         == 409
     )
+
+
+
+def test_phase19_snapshot_does_not_follow_linked_parent(tmp_path):
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    secret = real_dir / "outside.md"
+    secret.write_text("outside data", encoding="utf-8")
+    linked_dir = tmp_path / "linked"
+    try:
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    observed = RecoverySnapshotService._observe_path(
+        str(linked_dir / "outside.md"),
+        "workspace_source",
+        {"original": "not-used"},
+    )
+
+    assert observed["is_symlink"] is True
+    assert observed["is_file"] is False
+    assert observed["sha256"] is None
+    assert observed["matches"] == []
+    assert str(linked_dir) in observed["error"]
