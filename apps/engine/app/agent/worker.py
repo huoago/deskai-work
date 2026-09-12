@@ -116,7 +116,11 @@ class AgentWorker:
     def retry(self, task_id: str) -> bool:
         with self.database.session() as session:
             task = session.get(Task, task_id)
-            if task is None or task.status not in {"failed", "blocked"}:
+            if (
+                task is None
+                or task.execution_mode != "agent"
+                or task.status not in {"failed", "blocked"}
+            ):
                 return False
             task.status = "pending"
             task.progress = 0.0
@@ -131,7 +135,10 @@ class AgentWorker:
         with self.database.session() as session:
             task = session.scalar(
                 select(Task)
-                .where(Task.status == "pending")
+                .where(
+                    Task.status == "pending",
+                    Task.execution_mode == "agent",
+                )
                 .order_by(Task.created_at, Task.id)
                 .limit(1)
             )
@@ -145,7 +152,10 @@ class AgentWorker:
     def _recover_interrupted(self) -> None:
         with self.database.session() as session:
             running_tasks = session.scalars(
-                select(Task).where(Task.status == "running")
+                select(Task).where(
+                    Task.status == "running",
+                    Task.execution_mode == "agent",
+                )
             ).all()
             for task in running_tasks:
                 task.status = "pending"
