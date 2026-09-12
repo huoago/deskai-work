@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.18.0") {
+  if ([string]$health.version -ne "0.19.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.18.0, got $($health.version)."
+    throw "Expected packaged engine version 0.19.0, got $($health.version)."
   }
 
   try {
@@ -155,6 +155,21 @@ try {
   }
 
   Write-Host "Packaged Recovery Center endpoint OK: count=$(@($recovery).Count)"
+
+  try {
+    $openApi = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/openapi.json" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged OpenAPI endpoint failed: $($_.Exception.Message)"
+  }
+
+  $snapshotRoute = "/recovery/{entity_type}/{transaction_id}/snapshot"
+  if ($null -eq $openApi.paths.PSObject.Properties[$snapshotRoute]) {
+    Write-EngineLogs
+    throw "Packaged Recovery Snapshot route is missing from OpenAPI."
+  }
+
+  Write-Host "Packaged Recovery Snapshot route OK"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force
