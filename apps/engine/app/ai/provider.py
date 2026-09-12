@@ -149,6 +149,7 @@ Use scope=global only for durable cross-project preferences/constraints/workflow
         reasoning_effort: str,
         user_request: str,
         tool_catalog: list[dict[str, Any]],
+        workspace_context: list[dict[str, Any]],
     ) -> dict[str, Any]:
         tool_names = [str(item.get("name") or "") for item in tool_catalog if item.get("name")]
         if not tool_names:
@@ -203,16 +204,21 @@ Use scope=global only for durable cross-project preferences/constraints/workflow
 
 Each step MUST call exactly one tool from the supplied catalog. Use the tool's parameter schema and provide the exact arguments as a JSON object serialized into arguments_json.
 
-Dependencies must refer only to EARLIER 1-based step positions. Keep the plan minimal and acyclic.
+The workspace context contains only authorized file metadata and may be used to select stable file_id values. Dependencies must refer only to EARLIER 1-based step positions. Keep the plan minimal and acyclic.
+
+A later step may reference structured output from one of its declared dependency steps by placing a placeholder in arguments_json, for example {{step:1.result.answer}}, {{step:2.result.value}}, or {{step:1.result.files.0.file_id}}. References must point only to declared earlier dependencies. Use references when an argument is genuinely produced by a prior step; do not invent values.
 
 Read/search/analysis/new-artifact tools may execute automatically after the user starts the plan. Any propose_* tool only stages an existing Phase 11-16 file transaction; it does not modify a source file. A plan will pause immediately after such a proposal and wait for the human to use the original desktop confirmation flow before continuing.
 
 Never invent a direct confirmation, overwrite, rollback, restore, purge, shell, browser, arbitrary Python, arbitrary URL fetch, permission change, or other tool that is not present in the catalog. If the requested outcome cannot be fully completed with available tools, state that in limitations instead of fabricating a step."""
         catalog_text = json.dumps(tool_catalog, ensure_ascii=False, separators=(",", ":"))
+        context_text = json.dumps(workspace_context, ensure_ascii=False, separators=(",", ":"))
         user_input = (
             "<user_request>\n"
             + user_request
-            + "\n</user_request>\n\n<tool_catalog>\n"
+            + "\n</user_request>\n\n<workspace_context>\n"
+            + context_text
+            + "\n</workspace_context>\n\n<tool_catalog>\n"
             + catalog_text
             + "\n</tool_catalog>"
         )
