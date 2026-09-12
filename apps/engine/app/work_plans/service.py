@@ -62,6 +62,7 @@ class WorkPlanService:
         self.file_organization_batch_service = file_organization_batch_service
         self.file_recycle_service = file_recycle_service
         self.file_recycle_batch_service = file_recycle_batch_service
+        self._monotonic = time.monotonic
 
     def draft(self, task_id: str) -> dict[str, Any]:
         claim = self._task_claim(task_id)
@@ -1156,7 +1157,7 @@ class WorkPlanService:
             self._fail_step(plan_id, step_id, run_id, resolve_error)
             return
 
-        started = time.monotonic()
+        started = self._monotonic()
         result = self.tool_registry.execute(
             agent_run_id=run_id,
             task_id=task_id,
@@ -1164,7 +1165,7 @@ class WorkPlanService:
             tool_name=tool_name,
             arguments=arguments,
         )
-        duration = max(0.0, time.monotonic() - started)
+        duration = max(0.0, self._monotonic() - started)
         timeout_exceeded = self._record_attempt_runtime(
             plan_id,
             step_id,
