@@ -489,7 +489,6 @@ class WorkPlanService:
             )
 
     def list(
-    def list(
         self,
         *,
         workspace_id: str | None = None,
@@ -597,7 +596,6 @@ class WorkPlanService:
             self._fail(plan_id, run_id, f"{type(exc).__name__}: {exc}")
             return self.get(plan_id)
 
-    def _execute_step(self, plan_id: str, step_id: str, run_id: str) -> None:
     def _execute_step(self, plan_id: str, step_id: str, run_id: str) -> None:
         now = datetime.now(timezone.utc)
         resolve_error: str | None = None
@@ -1088,7 +1086,6 @@ class WorkPlanService:
                 )
             )
 
-    def _complete(self, plan_id: str, run_id: str) -> None:
     def _complete(self, plan_id: str, run_id: str) -> None:
         now = datetime.now(timezone.utc)
         with self.database.session() as session:
