@@ -7,7 +7,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import __version__
-
 from app.api.artifacts import router as artifacts_router
 from app.api.chat import router as chat_router
 from app.api.errors import AppError, app_error_handler
@@ -21,15 +20,15 @@ from app.api.providers import router as providers_router
 from app.api.recycle import router as recycle_router
 from app.api.recycle_batches import router as recycle_batches_router
 from app.api.recovery import router as recovery_router
-from app.api.recovery_reconciliation import router as recovery_reconciliation_router
 from app.api.recovery_evidence import router as recovery_evidence_router
+from app.api.recovery_reconciliation import router as recovery_reconciliation_router
 from app.api.roots import router as roots_router
 from app.api.settings import router as settings_router
 from app.api.source_edit_batches import router as source_edit_batches_router
 from app.api.source_edits import router as source_edits_router
 from app.api.tasks import router as tasks_router
-from app.api.workspaces import router as workspace_router
 from app.api.work_plans import router as work_plans_router
+from app.api.workspaces import router as workspace_router
 from app.agent.orchestrator import AgentOrchestrator
 from app.agent.tools import ToolRegistry
 from app.agent.worker import AgentWorker
@@ -41,17 +40,18 @@ from app.database.migrate import run_migrations
 from app.database.session import Database
 from app.file_ops.batch_service import FileOrganizationBatchService
 from app.file_ops.service import FileOrganizationService
-from app.recycle.batch_service import FileRecycleBatchService
-from app.recycle.service import FileRecycleService
-from app.recovery.reconciliation import RecoveryReconciliationService
-from app.recovery.evidence import RecoveryEvidenceService
-from app.recovery.snapshot import RecoverySnapshotService
 from app.indexing.watcher import WorkspaceWatcher
+from app.knowledge.embedding import EmbeddingService
 from app.knowledge.search import HybridSearch
 from app.knowledge.service import KnowledgeIndexer
 from app.memory.service import MemoryService
 from app.memory.worker import MemoryWorker
 from app.parsing.service import ParserWorker
+from app.recycle.batch_service import FileRecycleBatchService
+from app.recycle.service import FileRecycleService
+from app.recovery.evidence import RecoveryEvidenceService
+from app.recovery.reconciliation import RecoveryReconciliationService
+from app.recovery.snapshot import RecoverySnapshotService
 from app.security.secrets import SecretStore
 from app.source_edits.batch_service import SourceFileEditBatchService
 from app.source_edits.service import SourceFileEditService
@@ -79,6 +79,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.session_token = resolved.session_token
         app.state.secret_store = SecretStore()
         app.state.openai_provider = OpenAIChatProvider()
+        embedding_service = EmbeddingService(app.state.database, app.state.secret_store)
+        app.state.embedding_service = embedding_service
         watcher = WorkspaceWatcher(
             app.state.database,
             interval_seconds=resolved.watcher_interval_seconds,
@@ -94,12 +96,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.database,
             resolved.data_dir,
             resolved.vector_path,
+            embedding_service=embedding_service,
             interval_seconds=resolved.knowledge_worker_interval_seconds,
         )
         app.state.knowledge_indexer = knowledge_indexer
         app.state.hybrid_search = HybridSearch(
             app.state.database,
             knowledge_indexer.vector_store,
+            embedding_service,
         )
         memory_service = MemoryService(app.state.database)
         app.state.memory_service = memory_service
