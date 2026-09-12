@@ -40,6 +40,7 @@ from app.file_ops.batch_service import FileOrganizationBatchService
 from app.file_ops.service import FileOrganizationService
 from app.recycle.batch_service import FileRecycleBatchService
 from app.recycle.service import FileRecycleService
+from app.recovery.snapshot import RecoverySnapshotService
 from app.indexing.watcher import WorkspaceWatcher
 from app.knowledge.search import HybridSearch
 from app.knowledge.service import KnowledgeIndexer
@@ -146,6 +147,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.file_recycle_batch_service = file_recycle_batch_service
         file_recycle_batch_service.recover_incomplete_batches()
         file_recycle_service.recover_incomplete_operations()
+        app.state.recovery_snapshot_service = RecoverySnapshotService(
+            app.state.database,
+            source_edit_service,
+        )
         tool_registry = ToolRegistry(
             app.state.database,
             app.state.hybrid_search,
