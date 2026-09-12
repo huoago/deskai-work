@@ -16,6 +16,8 @@ DEFAULTS = {
     "auto_index": True,
     "memory_auto_learn": True,
     "memory_min_confidence": 0.78,
+    "embedding_provider": "local_hash",
+    "embedding_model": "text-embedding-3-small",
 }
 
 
@@ -26,6 +28,8 @@ class DesktopSettings(BaseModel):
     auto_index: bool = True
     memory_auto_learn: bool = True
     memory_min_confidence: float = Field(default=0.78, ge=0.5, le=1.0)
+    embedding_provider: Literal["local_hash", "openai"] = "local_hash"
+    embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] = "text-embedding-3-small"
 
 
 class DesktopSettingsUpdate(BaseModel):
@@ -35,6 +39,8 @@ class DesktopSettingsUpdate(BaseModel):
     auto_index: bool | None = None
     memory_auto_learn: bool | None = None
     memory_min_confidence: float | None = Field(default=None, ge=0.5, le=1.0)
+    embedding_provider: Literal["local_hash", "openai"] | None = None
+    embedding_model: Literal["text-embedding-3-small", "text-embedding-3-large"] | None = None
 
 
 def _read_settings(request: Request) -> DesktopSettings:
