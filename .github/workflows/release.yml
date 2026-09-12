@@ -77,9 +77,11 @@ jobs:
           }
           $checksums | Set-Content "$bundle/SHA256SUMS.txt"
           $engineVersion = (Get-Content apps/engine/app/__init__.py -Raw) -replace '.*__version__\s*=\s*"([^"]+)".*','$1'
+          $desktopVersion = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           @(
             "tag=$env:RELEASE_TAG",
             "commit=${{ github.sha }}",
+            "desktop_version=$desktopVersion",
             "engine_version=$engineVersion",
             "generated_utc=$([DateTime]::UtcNow.ToString('o'))"
           ) | Set-Content "$bundle/RELEASE-MANIFEST.txt"

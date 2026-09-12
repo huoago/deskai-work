@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import UpdateStatus from "./UpdateStatus";
 import "./styles.css";
 import "./phase2.css";
 import "./phase3.css";
@@ -17,9 +18,11 @@ import "./phase17.css";
 import "./phase18.css";
 import "./phase19.css";
 import "./phase20.css";
+import "./phase26.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
+    <UpdateStatus />
   </React.StrictMode>,
 );
