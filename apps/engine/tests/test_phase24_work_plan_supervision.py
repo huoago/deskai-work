@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.security.secrets import SecretStatus
 
 
@@ -48,6 +50,39 @@ def _workspace_task(client):
         },
     ).json()
     return workspace, task
+
+
+def _workspace_file(client, tmp_path: Path, name: str = "phase24-notes.md"):
+    workspace = client.post("/workspaces", json={"name": "Phase 24 file gate"}).json()
+    root = tmp_path / f"phase24-{name.replace('.', '-')}"
+    root.mkdir()
+    source = root / name
+    source.write_text("old value\n", encoding="utf-8")
+    response = client.post(
+        f"/workspaces/{workspace['id']}/roots",
+        json={
+            "path": str(root),
+            "read_allowed": True,
+            "write_allowed": True,
+            "watch_enabled": False,
+            "scan_now": True,
+        },
+    )
+    assert response.status_code == 201
+    file = next(
+        item
+        for item in client.get(f"/files?workspace_id={workspace['id']}").json()
+        if item["filename"] == name
+    )
+    task = client.post(
+        "/tasks",
+        json={
+            "workspace_id": workspace["id"],
+            "request": "Run a supervised protected file proposal",
+            "execution_mode": "plan",
+        },
+    ).json()
+    return workspace, task, file, source
 
 
 def _calc_step(title: str, expression: str, depends: list[int] | None = None):
@@ -215,6 +250,142 @@ def test_phase24_skip_is_allowed_only_without_active_dependents(client):
     )
     assert denied.status_code == 409
     assert "depend" in denied.json()["detail"].lower()
+
+
+
+def test_phase24_skip_wins_if_supervisor_changes_selected_step_before_execution(
+    client,
+    monkeypatch,
+):
+    _, task = _workspace_task(client)
+    _wire_planner(client, [_calc_step("Race-safe optional step", "21+21")])
+    plan = _draft(client, task["id"])
+    step_id = plan["steps"][0]["id"]
+
+    service = client.app.state.work_plan_service
+    registry = client.app.state.tool_registry
+    original_execute_step = service._execute_step
+    original_registry_execute = registry.execute
+    executed = {"count": 0}
+    skipped = {"done": False}
+
+    def counted_execute(**kwargs):
+        executed["count"] += 1
+        return original_registry_execute(**kwargs)
+
+    def skip_before_claim(plan_id, selected_step_id, run_id):
+        if not skipped["done"]:
+            response = client.post(
+                f"/work-plans/{plan_id}/steps/{selected_step_id}/skip",
+                json={"reason": "Supervisor skipped after selection but before tool claim"},
+            )
+            assert response.status_code == 200
+            skipped["done"] = True
+        return original_execute_step(plan_id, selected_step_id, run_id)
+
+    registry.execute = counted_execute
+    monkeypatch.setattr(service, "_execute_step", skip_before_claim)
+    try:
+        assert client.post(f"/work-plans/{plan['id']}/start").json()["status"] == "queued"
+        assert _process(client, limit=1)["processed"] == 1
+    finally:
+        registry.execute = original_registry_execute
+
+    completed = client.get(f"/work-plans/{plan['id']}").json()
+    assert completed["status"] == "completed"
+    assert completed["steps"][0]["id"] == step_id
+    assert completed["steps"][0]["status"] == "skipped"
+    assert completed["supervision"]["auto_steps_used"] == 0
+    assert executed["count"] == 0
+
+
+def test_phase24_cancel_clears_step_waiting_for_supervision_approval(client):
+    _, task = _workspace_task(client)
+    _wire_planner(client, [_calc_step("Approval then cancel", "7+8")])
+    plan = _draft(client, task["id"])
+    assert client.patch(
+        f"/work-plans/{plan['id']}/supervision",
+        json={"approval_risk_threshold": 1},
+    ).status_code == 200
+
+    assert client.post(f"/work-plans/{plan['id']}/start").json()["status"] == "queued"
+    assert _process(client, limit=1)["processed"] == 1
+    waiting = client.get(f"/work-plans/{plan['id']}").json()
+    assert waiting["status"] == "awaiting_step_approval"
+    assert waiting["steps"][0]["status"] == "awaiting_step_approval"
+
+    cancelled = client.post(f"/work-plans/{plan['id']}/cancel")
+    assert cancelled.status_code == 200
+    payload = cancelled.json()
+    assert payload["status"] == "cancelled"
+    assert payload["steps"][0]["status"] == "cancelled"
+
+
+def test_phase24_proposal_timeout_pauses_after_existing_confirmation(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    _, task, file, source = _workspace_file(client, tmp_path)
+    _wire_planner(
+        client,
+        [
+            {
+                "title": "Stage protected edit",
+                "description": "Create a protected source-edit proposal.",
+                "tool_name": "propose_source_file_edit",
+                "arguments_json": (
+                    '{"file_id":"'
+                    + file["id"]
+                    + '","mode":"text_replace","summary":"Phase 24 timeout gate",'
+                    '"replacements":[{"find":"old","replace":"new","replace_all":true}],'
+                    '"cell_edits":[]}'
+                ),
+                "depends_on_positions": [],
+            },
+            _calc_step("Later calculation", "10+5", [1]),
+        ],
+    )
+    plan = _draft(client, task["id"])
+    assert client.patch(
+        f"/work-plans/{plan['id']}/supervision",
+        json={"step_timeout_seconds": 5},
+    ).status_code == 200
+
+    ticks = iter([100.0, 106.5, 200.0, 200.1])
+    monkeypatch.setattr(
+        client.app.state.work_plan_service,
+        "_monotonic",
+        lambda: next(ticks),
+    )
+
+    assert client.post(f"/work-plans/{plan['id']}/start").json()["status"] == "queued"
+    assert _process(client, limit=1)["processed"] == 1
+    waiting = client.get(f"/work-plans/{plan['id']}").json()
+    assert waiting["status"] == "awaiting_confirmation"
+    gate = waiting["steps"][0]
+    assert gate["timeout_exceeded"] is True
+    assert gate["external_entity_id"]
+    assert waiting["steps"][1]["status"] == "pending"
+    assert source.read_text(encoding="utf-8") == "old value\n"
+
+    confirmed = client.post(f"/file-edits/{gate['external_entity_id']}/confirm")
+    assert confirmed.status_code == 200
+    assert source.read_text(encoding="utf-8") == "new value\n"
+
+    resumed = client.post(f"/work-plans/{plan['id']}/resume")
+    assert resumed.status_code == 200
+    paused = resumed.json()
+    assert paused["status"] == "paused"
+    assert "timeout" in (paused["pause_reason"] or "").lower()
+    assert paused["steps"][0]["status"] == "completed"
+    assert paused["steps"][1]["status"] == "pending"
+
+    assert client.post(f"/work-plans/{plan['id']}/continue").json()["status"] == "queued"
+    assert _process(client, limit=1)["processed"] == 1
+    completed = client.get(f"/work-plans/{plan['id']}").json()
+    assert completed["status"] == "completed"
+    assert completed["steps"][1]["result"]["result"] == 15
 
 
 def test_phase24_step_budget_pauses_then_can_be_extended(client):
