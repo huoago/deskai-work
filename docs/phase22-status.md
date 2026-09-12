@@ -1,6 +1,6 @@
 # Phase 22 — Controlled multi-step work plans
 
-Status: implemented on the Phase 22 verification branch; full CI and Windows artifact verification pending.
+Status: complete, fully verified, and merged to main.
 
 ## Objective
 
@@ -98,4 +98,44 @@ Plan-mode task detail exposes the plan summary, limitations, dependency graph, t
 - no Agent Worker competition with plan-mode Tasks;
 - original Phase 11–21 safety state machines remain authoritative.
 
-Final test count, CI run, packaged Engine 0.22.0 smoke result, Windows installers, Artifact ID/hash, PR number and merge SHA will be recorded after verification.
+## Verification and release evidence
+
+Feature PR:
+
+- PR #39 — Phase 22 — Controlled multi-step work plans
+- feature head: `31d04927a383760ec357b8fa4567779a2ca2647e`
+- feature merge SHA: `8006f9e8bd17c982f308955a2286ba71d728bd05`
+
+CI history:
+
+- Run #111 / ID `34692933294`: desktop-web passed; Engine stopped at Ruff because of one unused local variable (`F841`). No functional or test failure was merged.
+- the Ruff-only issue was removed on the feature branch.
+- Run #112 / ID `34692976649`: final feature verification succeeded.
+
+Final Run #112 results:
+
+- desktop TypeScript typecheck: passed
+- desktop Vite production build: passed
+- Ruff: passed
+- Engine pytest: **150 passed, 59 warnings in 54.63s**
+- Windows packaged sidecar build: passed
+- packaged Engine smoke: passed
+- packaged Engine version: **0.22.0**
+- packaged Work Plan endpoint smoke: **count=0**
+- Tauri Windows native build: passed
+- NSIS installer: `DeskAI Work_0.1.0_x64-setup.exe`
+- MSI installer: `DeskAI Work_0.1.0_x64_en-US.msi`
+
+Windows artifact:
+
+- name: `DeskAI-Work-Windows`
+- Artifact ID: **10298471688**
+- size: **394,508,349 bytes**
+- SHA-256: `ca1ab21f894d81fc166ad15fdfed7c4bcebe1fbe3d9a719bb305c4d2fd614400`
+- created: 2026-09-12T12:24:07Z
+- expires: 2026-12-11T12:11:02Z
+- artifact was not expired at verification time.
+
+## Final Phase 22 state
+
+Phase 22 is now the verified mainline implementation for persistent multi-step work execution. It adds orchestration, persistence and explicit resume/retry semantics without introducing any new direct mutation authority over Workspace files. The original Phase 11–21 safety state machines remain the source of truth for protected file actions and recovery.
