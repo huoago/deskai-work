@@ -46,6 +46,30 @@ def knowledge_status(request: Request, workspace_id: str | None = Query(default=
     return snapshot
 
 
+@router.get("/knowledge/embeddings/local-model")
+def local_embedding_model_status(request: Request) -> dict:
+    try:
+        return request.app.state.embedding_service.local_model_status()
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/knowledge/embeddings/local-model/download")
+def download_local_embedding_model(request: Request) -> dict:
+    try:
+        return request.app.state.embedding_service.install_local_model()
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/knowledge/embeddings/local-model")
+def delete_local_embedding_model(request: Request) -> dict:
+    try:
+        return request.app.state.embedding_service.remove_local_model()
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/knowledge/process")
 def process_knowledge_queue(
     request: Request,
