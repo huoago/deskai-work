@@ -538,6 +538,26 @@ export type RecoverySnapshot = {
   audit_timeline: RecoverySnapshotAuditEvent[];
 };
 
+export type RecoveryReconciliationProposal = {
+  id: string;
+  task_id: string | null;
+  workspace_id: string;
+  entity_type: string;
+  transaction_id: string;
+  status: "pending" | "confirmed" | "rejected" | "stale" | string;
+  snapshot_fingerprint: string;
+  snapshot_state: string;
+  target_status: "applied" | "recycled" | string;
+  historical_action: "rollback" | "restore" | string;
+  error_message: string | null;
+  created_at: string;
+  confirmed_at: string | null;
+  rejected_at: string | null;
+  stale_at: string | null;
+  requires_user_confirmation: boolean;
+  filesystem_mutation: false;
+};
+
 export type RecoveryEntry = {
   id: string;
   entity_type:
@@ -922,6 +942,34 @@ export function getRecoverySnapshot(
 ): Promise<RecoverySnapshot> {
   return request<RecoverySnapshot>(
     `/recovery/${encodeURIComponent(entityType)}/${encodeURIComponent(transactionId)}/snapshot`,
+  );
+}
+
+export function proposeRecoveryReconciliation(
+  entityType: string,
+  transactionId: string,
+): Promise<RecoveryReconciliationProposal> {
+  return request<RecoveryReconciliationProposal>(
+    `/recovery-reconciliations/transactions/${encodeURIComponent(entityType)}/${encodeURIComponent(transactionId)}`,
+    { method: "POST" },
+  );
+}
+
+export function confirmRecoveryReconciliation(
+  proposalId: string,
+): Promise<RecoveryReconciliationProposal> {
+  return request<RecoveryReconciliationProposal>(
+    `/recovery-reconciliations/${encodeURIComponent(proposalId)}/confirm`,
+    { method: "POST" },
+  );
+}
+
+export function rejectRecoveryReconciliation(
+  proposalId: string,
+): Promise<RecoveryReconciliationProposal> {
+  return request<RecoveryReconciliationProposal>(
+    `/recovery-reconciliations/${encodeURIComponent(proposalId)}/reject`,
+    { method: "POST" },
   );
 }
 

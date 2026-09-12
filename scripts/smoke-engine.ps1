@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.19.0") {
+  if ([string]$health.version -ne "0.20.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.19.0, got $($health.version)."
+    throw "Expected packaged engine version 0.20.0, got $($health.version)."
   }
 
   try {
@@ -170,6 +170,26 @@ try {
   }
 
   Write-Host "Packaged Recovery Snapshot route OK"
+
+  $reconciliationListRoute = "/recovery-reconciliations"
+  $reconciliationConfirmRoute = "/recovery-reconciliations/{proposal_id}/confirm"
+  if ($null -eq $openApi.paths.PSObject.Properties[$reconciliationListRoute]) {
+    Write-EngineLogs
+    throw "Packaged Recovery Reconciliation list route is missing from OpenAPI."
+  }
+  if ($null -eq $openApi.paths.PSObject.Properties[$reconciliationConfirmRoute]) {
+    Write-EngineLogs
+    throw "Packaged Recovery Reconciliation confirm route is missing from OpenAPI."
+  }
+
+  try {
+    $reconciliations = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/recovery-reconciliations" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Recovery Reconciliation API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Recovery Reconciliation endpoint OK: count=$(@($reconciliations).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 19 are complete, fully verified, and merged to `main`.**
+**Phase 0 through Phase 19 are complete and merged to `main`. Phase 20 is implemented on its verification branch.**
 
 Implemented foundations:
 
@@ -91,8 +91,9 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 17 — Unified recovery center:** complete with read-only Workspace-scoped aggregation of Phase 11–16 applied/recycled/recovery-required transactions, desktop recoverable/attention/history filters, rollback/restore buttons that reuse the original transaction APIs, 120 passing Engine tests, packaged Engine 0.17.0 recovery smoke verification, and verified Windows installers.
 - **Phase 18 — Recovery diagnostics & guided repair:** complete with deterministic classification of recovery_required states, structured evidence/confidence, guided manual verification steps, prohibited-action guardrails, no new mutation endpoint, no automatic force repair, 125 passing Engine tests, packaged Engine 0.18.0 recovery smoke verification, and verified Windows NSIS/MSI installers.
 - **Phase 19 — Recovery snapshot & safe recheck:** complete with an on-demand read-only snapshot endpoint for recovery_required transactions, current path existence/size/SHA inspection, source-edit backup/candidate verification, recycle quarantine verification, organization source/target reconciliation, batch consistency assessment, audit timeline evidence, symlink/junction-component non-following, no automatic transaction-state mutation, 131 passing Engine tests, packaged Engine 0.19.0 snapshot-route smoke verification, and verified Windows NSIS/MSI installers.
+- **Phase 20 — Controlled recovery state reconciliation:** implemented with persisted two-step reconciliation proposals, stable snapshot fingerprints, confirmation-time rechecks, stale-proposal invalidation, metadata-only unfreezing to applied/recycled, batch-wide reconciliation, audit records, and no user-file mutation. Full CI/Windows verification is recorded in `docs/phase20-status.md` after the feature PR completes.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, `docs/phase18-status.md`, and `docs/phase19-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, `docs/phase18-status.md`, `docs/phase19-status.md`, and `docs/phase20-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -172,5 +173,6 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Phase 13/14 provide confirmed same-root rename/move only. Phase 15 adds recoverable recycle-to-quarantine for one file after explicit confirmation; permanent purge, directory operations, cross-root moves, extension changes, target overwrite, and arbitrary destination writes remain unavailable.
 - Phase 18 recovery diagnostics are read-only derivations from persisted transaction state. They never alter files, backups, quarantine copies, hashes, Workspace permissions, or transaction status.
 - Phase 19 recovery snapshots are requested manually, inspect only transaction-known paths, refuse to follow symlinks, and never persist the snapshot or clear recovery_required.
+- Phase 20 reconciliation requires a persisted proposal plus a second human confirmation, re-captures and fingerprints the current snapshot, marks changed proposals stale, and only updates transaction/File metadata to reconnect a verified applied/recycled state to the original rollback/restore API.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.
