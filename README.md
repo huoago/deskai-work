@@ -4,7 +4,7 @@ DeskAI Work is a Windows-first, local-first AI work assistant. It is designed to
 
 ## Current implementation status
 
-**Phase 0 through Phase 23 are complete, fully verified, and merged to `main`.**
+**Phase 0 through Phase 23 are complete, fully verified, and merged to `main`. Phase 24 is complete and fully verified on its feature branch, pending merge.**
 
 Implemented foundations:
 
@@ -95,8 +95,9 @@ The implementation deliberately keeps major capabilities behind verified phase g
 - **Phase 21 — Recovery evidence export & incident package:** complete with metadata-only ZIP evidence bundles, Phase 18 diagnostics, live Phase 19 snapshots for frozen transactions, Phase 20 reconciliation history, Task audit timelines, per-file package integrity hashes, GeneratedArtifact sandbox output, no Workspace file bytes, no user-file mutation, 143 passing Engine tests, packaged Engine 0.21.0 evidence-route smoke verification, and verified Windows NSIS/MSI installers.
 - **Phase 22 — Controlled multi-step work plans:** complete with plan-mode Tasks, persistent WorkPlan/WorkPlanStep state, dependency-aware execution, locally recomputed tool risk, structured dependency-result references, explicit start/resume/retry/cancel controls, proposal-gate pauses that reuse the original Phase 11–16 confirmations, interruption freeze without automatic replay, full ToolCall/AuditLog reuse, 150 passing Engine tests, packaged Engine 0.22.0 work-plan smoke verification, and verified Windows NSIS/MSI installers.
 - **Phase 23 — Durable background work-plan runner:** complete with a dedicated WorkPlanWorker, persisted queued/cancelling states, non-blocking Start/Resume/Retry, safe checkpoint restart requeue, ambiguous-running-step freeze, race-safe cancellation after the current tool returns, preserved proposal gates, worker status/manual process APIs, automatic desktop task-detail refresh, 156 passing Engine tests, packaged Engine 0.23.0 + WorkPlanWorker smoke verification, and verified Windows NSIS/MSI installers.
+- **Phase 24 — Work Plan Supervision & Human Control:** complete and fully verified with pause/continue boundaries, conditional Worker/step state claims, dependency-safe human skip, persistent step/runtime budgets, soft per-step timeout preserved through proposal confirmation, pause/stop failure policy, locally risk-gated pre-step approval, persistent WorkPlanEvent timeline/notifications, ETA/remaining-step estimates, and desktop supervision controls; 169 passing Engine tests, packaged Engine 0.24.0 + supervision-route smoke verification, and verified Windows NSIS/MSI installers.
 
-See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, `docs/phase18-status.md`, `docs/phase19-status.md`, `docs/phase20-status.md`, `docs/phase21-status.md`, `docs/phase22-status.md`, and `docs/phase23-status.md` for the current implementation.
+See `docs/phase2-status.md`, `docs/phase3-status.md`, `docs/phase4-status.md`, `docs/phase5-status.md`, `docs/phase6-status.md`, `docs/phase7-status.md`, `docs/phase8-status.md`, `docs/phase9-status.md`, `docs/phase10-status.md`, `docs/phase11-status.md`, `docs/phase12-status.md`, `docs/phase13-status.md`, `docs/phase14-status.md`, `docs/phase15-status.md`, `docs/phase16-status.md`, `docs/phase17-status.md`, `docs/phase18-status.md`, `docs/phase19-status.md`, `docs/phase20-status.md`, `docs/phase21-status.md`, `docs/phase22-status.md`, `docs/phase23-status.md`, and `docs/phase24-status.md` for the current implementation.
 
 ## Repository layout
 
@@ -180,5 +181,6 @@ The Tauri app starts the bundled `deskai-engine` sidecar on a free loopback port
 - Phase 21 recovery evidence export writes only metadata/diagnostic/snapshot/audit ZIPs to the generated-artifact sandbox; it never embeds Workspace, candidate, backup, or quarantine file bytes and never changes recovery state.
 - Phase 22 multi-step plans do not gain new filesystem authority: registered tools and PermissionGate remain authoritative, propose_* steps pause at the original human confirmation gates, rejected/ambiguous file actions are never bypassed, and interrupted steps are never replayed automatically.
 - Phase 23 moves plan execution to a durable background Worker without expanding tool authority: safe checkpoints may be requeued after restart, ambiguous running steps freeze as interrupted, and cancellation never force-kills a running tool or auto-mutates an existing proposal.
+- Phase 24 adds supervision rather than authority: pause/soft-timeout stop at safe step boundaries, skip is dependency-gated and unavailable for proposal steps, risk approvals can only add gates, and budgets/failure policy cannot weaken PermissionGate or file confirmations.
 
 See `docs/security.md`, `docs/phase0-status.md`, `docs/phase2-status.md`, and `docs/phase5-status.md`.

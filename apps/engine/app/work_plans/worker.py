@@ -5,7 +5,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.database.models import AuditLog, Task, WorkPlan
 
@@ -20,6 +20,8 @@ class WorkPlanWorkerSnapshot:
     failed: int
     blocked: int
     awaiting_confirmation: int
+    awaiting_step_approval: int
+    paused: int
     cancelled: int
     last_plan_id: str | None
     last_completed_at: str | None
@@ -33,6 +35,8 @@ class WorkPlanWorkerSnapshot:
             "failed": self.failed,
             "blocked": self.blocked,
             "awaiting_confirmation": self.awaiting_confirmation,
+            "awaiting_step_approval": self.awaiting_step_approval,
+            "paused": self.paused,
             "cancelled": self.cancelled,
             "last_plan_id": self.last_plan_id,
             "last_completed_at": self.last_completed_at,
@@ -41,7 +45,7 @@ class WorkPlanWorkerSnapshot:
 
 
 class WorkPlanWorker:
-    """Background runner for persistent Phase 23 work plans."""
+    """Background runner for persistent supervised work plans."""
 
     def __init__(self, database, service, *, interval_seconds: float = 1.0) -> None:
         self.database = database
@@ -57,6 +61,8 @@ class WorkPlanWorker:
         self._failed = 0
         self._blocked = 0
         self._awaiting_confirmation = 0
+        self._awaiting_step_approval = 0
+        self._paused = 0
         self._cancelled = 0
         self._last_plan_id: str | None = None
         self._last_completed_at: str | None = None
@@ -94,6 +100,8 @@ class WorkPlanWorker:
                 failed=self._failed,
                 blocked=self._blocked,
                 awaiting_confirmation=self._awaiting_confirmation,
+                awaiting_step_approval=self._awaiting_step_approval,
+                paused=self._paused,
                 cancelled=self._cancelled,
                 last_plan_id=self._last_plan_id,
                 last_completed_at=self._last_completed_at,
@@ -138,9 +146,22 @@ class WorkPlanWorker:
             )
             if plan is None:
                 return None
-            plan.status = "running"
-            plan.started_at = plan.started_at or now
-            plan.error_message = None
+            claimed = session.execute(
+                update(WorkPlan)
+                .where(
+                    WorkPlan.id == plan.id,
+                    WorkPlan.status == "queued",
+                )
+                .values(
+                    status="running",
+                    started_at=plan.started_at or now,
+                    error_message=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if claimed.rowcount != 1:
+                return None
+            session.refresh(plan)
             task = session.get(Task, plan.task_id)
             if task is not None:
                 task.status = "running"
@@ -169,12 +190,16 @@ class WorkPlanWorker:
             self._processed += 1
             if status == "completed":
                 self._completed += 1
-            elif status in {"failed", "paused"}:
+            elif status == "failed":
                 self._failed += 1
             elif status == "blocked":
                 self._blocked += 1
             elif status == "awaiting_confirmation":
                 self._awaiting_confirmation += 1
+            elif status == "awaiting_step_approval":
+                self._awaiting_step_approval += 1
+            elif status == "paused":
+                self._paused += 1
             elif status == "cancelled":
                 self._cancelled += 1
             self._last_plan_id = plan_id
@@ -183,7 +208,8 @@ class WorkPlanWorker:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            processed = self.process_available(limit=2)
-            if processed == 0:
-                self._wake.wait(self.interval_seconds)
-                self._wake.clear()
+            processed = self.process_available(limit=3)
+            if processed:
+                continue
+            self._wake.wait(self.interval_seconds)
+            self._wake.clear()

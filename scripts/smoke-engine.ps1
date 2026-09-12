@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.23.0") {
+  if ([string]$health.version -ne "0.24.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.23.0, got $($health.version)."
+    throw "Expected packaged engine version 0.24.0, got $($health.version)."
   }
 
   try {
@@ -260,6 +260,36 @@ try {
   }
 
   Write-Host "Packaged Work Plan Worker OK: running=$($workPlanWorker.running); processed=$($workPlanWorker.processed)"
+
+  $workPlanSupervisionRoute = "/work-plans/{plan_id}/supervision"
+  $workPlanPauseRoute = "/work-plans/{plan_id}/pause"
+  $workPlanContinueRoute = "/work-plans/{plan_id}/continue"
+  $workPlanApproveRoute = "/work-plans/{plan_id}/steps/{step_id}/approve"
+  $workPlanSkipRoute = "/work-plans/{plan_id}/steps/{step_id}/skip"
+  $workPlanEventsRoute = "/work-plans/{plan_id}/events"
+  $workPlanNotificationsRoute = "/work-plans/{plan_id}/notifications"
+
+  foreach ($route in @(
+    $workPlanSupervisionRoute,
+    $workPlanPauseRoute,
+    $workPlanContinueRoute,
+    $workPlanApproveRoute,
+    $workPlanSkipRoute,
+    $workPlanEventsRoute,
+    $workPlanNotificationsRoute
+  )) {
+    if ($null -eq $openApi.paths.PSObject.Properties[$route]) {
+      Write-EngineLogs
+      throw "Packaged Phase 24 supervision route is missing: $route"
+    }
+  }
+
+  if ($null -eq $workPlanWorker.awaiting_step_approval -or $null -eq $workPlanWorker.paused) {
+    Write-EngineLogs
+    throw "Packaged Work Plan Worker status is missing Phase 24 supervision counters."
+  }
+
+  Write-Host "Packaged Work Plan Supervision routes OK"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force
