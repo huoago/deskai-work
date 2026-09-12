@@ -93,7 +93,7 @@ def test_phase20_source_edit_reconciliation_requires_second_confirmation(
         record.error_message = "Simulated frozen applied edit"
 
     proposed = client.post(
-        f"/recovery-reconciliations/source_edit/{applied['id']}"
+        f"/recovery-reconciliations/transactions/source_edit/{applied['id']}"
     )
     assert proposed.status_code == 200
     proposal = proposed.json()
@@ -154,7 +154,7 @@ def test_phase20_reconciliation_becomes_stale_when_snapshot_changes(
         record.error_message = "Simulated frozen recycle"
 
     proposed = client.post(
-        f"/recovery-reconciliations/file_recycle/{recycle['id']}"
+        f"/recovery-reconciliations/transactions/file_recycle/{recycle['id']}"
     ).json()
     assert proposed["target_status"] == "recycled"
 
@@ -212,7 +212,7 @@ def test_phase20_organization_reconciliation_repairs_metadata_only(
         file.filename = Path(record.original_path).name
 
     reconciliation = client.post(
-        f"/recovery-reconciliations/file_organization/{proposal['id']}"
+        f"/recovery-reconciliations/transactions/file_organization/{proposal['id']}"
     ).json()
     assert reconciliation["snapshot_state"] == "consistent_applied"
     assert client.post(
@@ -265,7 +265,7 @@ def test_phase20_recycle_reconciliation_restores_original_restore_path(
         file.status = record.previous_file_status
 
     proposed = client.post(
-        f"/recovery-reconciliations/file_recycle/{recycle['id']}"
+        f"/recovery-reconciliations/transactions/file_recycle/{recycle['id']}"
     ).json()
     assert proposed["historical_action"] == "restore"
     assert client.post(
@@ -343,7 +343,7 @@ def test_phase20_source_edit_batch_reconciliation_is_atomic(
         members[0].status = "recovery_required"
 
     proposed = client.post(
-        f"/recovery-reconciliations/source_edit_batch/{batch['id']}"
+        f"/recovery-reconciliations/transactions/source_edit_batch/{batch['id']}"
     ).json()
     assert proposed["target_status"] == "applied"
     assert client.post(
@@ -385,7 +385,7 @@ def test_phase20_non_actionable_safe_state_cannot_be_reconciled(
         record.error_message = "Simulated freeze after original was restored"
 
     response = client.post(
-        f"/recovery-reconciliations/source_edit/{applied['id']}"
+        f"/recovery-reconciliations/transactions/source_edit/{applied['id']}"
     )
     assert response.status_code == 409
     assert "only reconciles verified applied or recycled states" in (
@@ -414,7 +414,7 @@ def test_phase20_reconciliation_reject_preserves_frozen_transaction(
         record.status = "recovery_required"
 
     proposal = client.post(
-        f"/recovery-reconciliations/source_edit/{applied['id']}"
+        f"/recovery-reconciliations/transactions/source_edit/{applied['id']}"
     ).json()
     rejected = client.post(
         f"/recovery-reconciliations/{proposal['id']}/reject"
@@ -444,7 +444,7 @@ def test_phase20_duplicate_proposal_reuses_same_snapshot(client, tmp_path):
         record = session.get(SourceFileEdit, applied["id"])
         record.status = "recovery_required"
 
-    url = f"/recovery-reconciliations/source_edit/{applied['id']}"
+    url = f"/recovery-reconciliations/transactions/source_edit/{applied['id']}"
     first = client.post(url).json()
     second = client.post(url).json()
     assert first["id"] == second["id"]
