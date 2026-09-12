@@ -394,6 +394,15 @@ class RecoveryReconciliationProposal(Base):
     target_status: Mapped[str] = mapped_column(String(32), nullable=False)
     historical_action: Mapped[str] = mapped_column(String(32), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text)
+    max_auto_steps: Mapped[int] = mapped_column(Integer, default=12, nullable=False)
+    auto_steps_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    runtime_budget_seconds: Mapped[int] = mapped_column(Integer, default=900, nullable=False)
+    runtime_seconds_used: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    step_timeout_seconds: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
+    failure_policy: Mapped[str] = mapped_column(String(32), default="pause", nullable=False)
+    approval_risk_threshold: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
+    pause_reason: Mapped[str | None] = mapped_column(Text)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,
@@ -465,6 +474,11 @@ class WorkPlanStep(Base):
     external_entity_type: Mapped[str | None] = mapped_column(String(64))
     external_entity_id: Mapped[str | None] = mapped_column(String(36))
     error_message: Mapped[str | None] = mapped_column(Text)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    skip_reason: Mapped[str | None] = mapped_column(Text)
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
+    timeout_exceeded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,
@@ -472,6 +486,31 @@ class WorkPlanStep(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkPlanEvent(Base):
+    __tablename__ = "work_plan_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    plan_id: Mapped[str] = mapped_column(
+        ForeignKey("work_plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[str | None] = mapped_column(
+        ForeignKey("work_plan_steps.id", ondelete="SET NULL"),
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    data_json: Mapped[Any] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+        index=True,
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentRun(Base):
