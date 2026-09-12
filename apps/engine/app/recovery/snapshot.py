@@ -417,10 +417,11 @@ class RecoverySnapshotService:
 
         path = Path(raw_path)
         try:
-            if path.is_symlink():
+            link_component = RecoverySnapshotService._link_component(path)
+            if link_component is not None:
                 base["exists"] = os.path.lexists(path)
                 base["is_symlink"] = True
-                base["error"] = "symlink_not_followed"
+                base["error"] = f"link_component_not_followed:{link_component}"
                 return base
             if not path.exists():
                 return base
@@ -442,6 +443,21 @@ class RecoverySnapshotService:
         except OSError as exc:
             base["error"] = f"{type(exc).__name__}: {exc}"
             return base
+
+    @staticmethod
+    def _link_component(path: Path) -> str | None:
+        chain = [candidate for candidate in reversed(path.parents)]
+        chain.append(path)
+        for candidate in chain:
+            try:
+                if candidate.is_symlink():
+                    return str(candidate)
+                is_junction = getattr(candidate, "is_junction", None)
+                if callable(is_junction) and is_junction():
+                    return str(candidate)
+            except OSError:
+                return str(candidate)
+        return None
 
     @staticmethod
     def _assessment(
