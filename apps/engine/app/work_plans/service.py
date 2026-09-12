@@ -600,25 +600,33 @@ class WorkPlanService:
         now = datetime.now(timezone.utc)
         resolve_error: str | None = None
         arguments: dict[str, Any] = {}
+        cancel_before_step = False
         with self.database.session() as session:
             plan = session.get(WorkPlan, plan_id)
             step = session.get(WorkPlanStep, step_id)
             if plan is None or step is None:
                 raise RuntimeError("Work plan step disappeared")
-            step.status = "running"
-            step.started_at = now
+            if plan.status == "cancelling":
+                cancel_before_step = True
+            else:
+                step.status = "running"
+                step.started_at = now
             task_id = plan.task_id
             workspace_id = plan.workspace_id
             tool_name = step.tool_name
             execution_mode = step.execution_mode
             risk_level = step.risk_level
-            try:
-                arguments = self._resolve_arguments(session, step)
-            except Exception as exc:
-                resolve_error = f"{type(exc).__name__}: {exc}"[:4000]
-                step.status = "failed"
-                step.error_message = resolve_error
-                step.completed_at = datetime.now(timezone.utc)
+            if not cancel_before_step:
+                try:
+                    arguments = self._resolve_arguments(session, step)
+                except Exception as exc:
+                    resolve_error = f"{type(exc).__name__}: {exc}"[:4000]
+                    step.status = "failed"
+                    step.error_message = resolve_error
+                    step.completed_at = datetime.now(timezone.utc)
+
+        if cancel_before_step:
+            return
 
         if resolve_error is not None:
             self._fail_step(plan_id, step_id, run_id, resolve_error)
@@ -659,41 +667,56 @@ class WorkPlanService:
                 task = session.get(Task, task_id)
                 if plan_row is None or step is None:
                     raise RuntimeError("Work plan disappeared after proposal creation")
-                step.status = "awaiting_confirmation"
+                cancel_requested = plan_row.status == "cancelling"
+                step.status = "completed" if cancel_requested else "awaiting_confirmation"
+                step.completed_at = (
+                    datetime.now(timezone.utc) if cancel_requested else None
+                )
                 step.result_summary = summary
                 step.result_json = actual
                 step.tool_call_id = tool_call_id
                 step.external_entity_type = external_type
                 step.external_entity_id = str(actual["id"])
-                plan_row.status = "awaiting_confirmation"
-                plan_row.error_message = None
+                if not cancel_requested:
+                    plan_row.status = "awaiting_confirmation"
+                    plan_row.error_message = None
                 if task is not None:
-                    task.status = "awaiting_confirmation"
                     task.progress = self._task_progress(session, plan_id)
-                    task.error_message = (
-                        "Work plan paused at an existing file-transaction confirmation gate"
-                    )
+                    if not cancel_requested:
+                        task.status = "awaiting_confirmation"
+                        task.error_message = (
+                            "Work plan paused at an existing file-transaction confirmation gate"
+                        )
                 session.add(
                     AuditLog(
                         task_id=task_id,
                         agent_run_id=run_id,
-                        action="work_plan_waiting_confirmation",
+                        action=(
+                            "work_plan_step_completed_after_cancel_request"
+                            if cancel_requested
+                            else "work_plan_waiting_confirmation"
+                        ),
                         target=step_id,
                         result=(
                             f"tool={tool_name}; entity_type={external_type}; "
-                            f"entity_id={actual['id']}; automatic_file_mutation=false"
+                            f"entity_id={actual['id']}; automatic_file_mutation=false; "
+                            f"cancel_requested={str(cancel_requested).lower()}"
                         ),
                         risk_level=risk_level,
                     )
                 )
+            if cancel_requested:
+                return
             self._finish_run(run_id, "awaiting_confirmation")
             return
 
         with self.database.session() as session:
+            plan_row = session.get(WorkPlan, plan_id)
             step = session.get(WorkPlanStep, step_id)
             task = session.get(Task, task_id)
-            if step is None:
+            if plan_row is None or step is None:
                 raise RuntimeError("Work plan step disappeared after tool execution")
+            cancel_requested = plan_row.status == "cancelling"
             step.status = "completed"
             step.completed_at = datetime.now(timezone.utc)
             step.result_summary = summary
@@ -706,9 +729,16 @@ class WorkPlanService:
                 AuditLog(
                     task_id=task_id,
                     agent_run_id=run_id,
-                    action="work_plan_step_completed",
+                    action=(
+                        "work_plan_step_completed_after_cancel_request"
+                        if cancel_requested
+                        else "work_plan_step_completed"
+                    ),
                     target=step_id,
-                    result=f"position={step.position}; tool={tool_name}",
+                    result=(
+                        f"position={step.position}; tool={tool_name}; "
+                        f"cancel_requested={str(cancel_requested).lower()}"
+                    ),
                     risk_level=risk_level,
                 )
             )
