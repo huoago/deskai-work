@@ -97,8 +97,11 @@ class HybridSearch:
             vector = row.get("vector")
             if chunk_id and chunk_id not in vector_rank:
                 vector_rank[chunk_id] = rank
-                if isinstance(vector, list):
-                    vector_by_chunk[chunk_id] = [float(item) for item in vector]
+                if vector is not None and not isinstance(vector, (str, bytes, dict)):
+                    try:
+                        vector_by_chunk[chunk_id] = [float(item) for item in vector]
+                    except (TypeError, ValueError):
+                        pass
 
         candidate_ids = set(lexical_rank) | set(vector_rank)
         if not candidate_ids:
