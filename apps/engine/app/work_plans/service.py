@@ -457,6 +457,8 @@ class WorkPlanService:
 
     def _execute_step(self, plan_id: str, step_id: str, run_id: str) -> None:
         now = datetime.now(timezone.utc)
+        resolve_error: str | None = None
+        arguments: dict[str, Any] = {}
         with self.database.session() as session:
             plan = session.get(WorkPlan, plan_id)
             step = session.get(WorkPlanStep, step_id)
@@ -472,11 +474,14 @@ class WorkPlanService:
             try:
                 arguments = self._resolve_arguments(session, step)
             except Exception as exc:
-                message = f"{type(exc).__name__}: {exc}"[:4000]
+                resolve_error = f"{type(exc).__name__}: {exc}"[:4000]
                 step.status = "failed"
-                step.error_message = message
+                step.error_message = resolve_error
                 step.completed_at = datetime.now(timezone.utc)
-                raise RuntimeError(message) from exc
+
+        if resolve_error is not None:
+            self._fail_step(plan_id, step_id, run_id, resolve_error)
+            return
 
         result = self.tool_registry.execute(
             agent_run_id=run_id,
