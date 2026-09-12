@@ -558,10 +558,41 @@ class WorkPlanService:
             if step.execution_mode != "auto":
                 raise ValueError("Proposal-gate steps use their original confirmation flow")
 
-            step.approved_at = now
-            step.status = "pending"
-            plan.status = "queued"
-            plan.error_message = None
+            step_claimed = session.execute(
+                update(WorkPlanStep)
+                .where(
+                    WorkPlanStep.id == step_id,
+                    WorkPlanStep.plan_id == plan_id,
+                    WorkPlanStep.status == "awaiting_step_approval",
+                )
+                .values(
+                    approved_at=now,
+                    status="pending",
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if step_claimed.rowcount != 1:
+                raise ValueError(
+                    "Step changed state before approval could be applied; reload the plan"
+                )
+            plan_claimed = session.execute(
+                update(WorkPlan)
+                .where(
+                    WorkPlan.id == plan_id,
+                    WorkPlan.status == "awaiting_step_approval",
+                )
+                .values(
+                    status="queued",
+                    error_message=None,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if plan_claimed.rowcount != 1:
+                raise ValueError(
+                    "Plan changed state before approval could be applied; reload the plan"
+                )
+            session.refresh(step)
+            session.refresh(plan)
             task = session.get(Task, plan.task_id)
             if task is not None:
                 task.status = "queued"
@@ -642,8 +673,24 @@ class WorkPlanService:
                     "Step changed state before the skip could be applied; reload the plan"
                 )
             session.refresh(step)
-            if plan.status == "awaiting_step_approval":
-                plan.status = "queued"
+            if expected_status == "awaiting_step_approval":
+                plan_claimed = session.execute(
+                    update(WorkPlan)
+                    .where(
+                        WorkPlan.id == plan_id,
+                        WorkPlan.status == "awaiting_step_approval",
+                    )
+                    .values(
+                        status="queued",
+                        error_message=None,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if plan_claimed.rowcount != 1:
+                    raise ValueError(
+                        "Plan changed state before the skip could be applied; reload the plan"
+                    )
+                session.refresh(plan)
                 task = session.get(Task, plan.task_id)
                 if task is not None:
                     task.status = "queued"
@@ -875,6 +922,14 @@ class WorkPlanService:
                 plan_id,
                 reason="Cancellation was requested before background execution started",
             )
+            return self.get(plan_id)
+        if plan.status == "pausing":
+            self._finalize_pause(
+                plan_id,
+                reason=plan.pause_reason or "Pause requested before tool execution started",
+            )
+            return self.get(plan_id)
+        if plan.status == "paused":
             return self.get(plan_id)
         if plan.status != "running":
             raise ValueError("Work plan must be claimed by the background worker first")
