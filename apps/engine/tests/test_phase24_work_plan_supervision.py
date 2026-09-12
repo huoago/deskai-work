@@ -261,7 +261,8 @@ def test_phase24_soft_timeout_pauses_only_after_tool_returns(client, monkeypatch
 
     ticks = iter([100.0, 106.5])
     monkeypatch.setattr(
-        "app.work_plans.service.time.monotonic",
+        client.app.state.work_plan_service,
+        "_monotonic",
         lambda: next(ticks),
     )
 
