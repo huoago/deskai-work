@@ -1,6 +1,6 @@
 # Phase 20 — Controlled recovery state reconciliation
 
-Status: implementation complete on the Phase 20 branch; full CI and Windows artifact verification pending.
+Status: complete, fully verified, and merged to `main`.
 
 ## Objective
 
@@ -183,4 +183,41 @@ Phase 20 tests cover:
 - duplicate proposal reuse for an unchanged snapshot;
 - packaged Engine 0.20.0 exposure of reconciliation routes.
 
-Final test count, CI run, Windows installers, Artifact id/hash, PR number and merge SHA are recorded here after verification completes.
+## Verification results
+
+The first feature CI run (#100) intentionally exposed an API route ambiguity between proposal creation and proposal confirmation/rejection. The create route was changed to the static-prefixed transaction route, the eligibility check ordering was corrected, and the full verification suite was rerun.
+
+Final feature PR #35 verification passed on CI Run #102:
+
+- TypeScript typecheck — passed;
+- Vite production build — passed;
+- Ruff — passed;
+- full Engine Pytest suite — **139 passed, 59 warnings**;
+- Windows PyInstaller sidecar — passed;
+- packaged Engine **0.20.0** health smoke — passed;
+- packaged Recovery Snapshot route smoke — passed;
+- packaged Recovery Reconciliation list/API smoke — passed;
+- Tauri Windows NSIS build — passed;
+- Tauri Windows MSI build — passed;
+- Windows Artifact upload — passed.
+
+Verified Windows installers:
+
+- `DeskAI Work_0.1.0_x64-setup.exe`;
+- `DeskAI Work_0.1.0_x64_en-US.msi`.
+
+Verified Windows Artifact:
+
+- name: `DeskAI-Work-Windows`;
+- artifact id: `10289817242`;
+- size: `394428600` bytes;
+- SHA-256: `3dbfee745d0430ef60e1c32cd12f4711976e577711d80268ad2df7b97be6a582`.
+
+Feature PR #35 was squash merged to `main` as:
+
+`2b3908b121f0f9a8976c47f969a42de9bd3a27b1`
+
+Successful CI Run #102:
+
+`34668549449`
+
