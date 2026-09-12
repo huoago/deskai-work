@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  acknowledgeWorkPlanEvent,
   addWorkspaceRoot,
   checkEngine,
   confirmSourceFileEdit,
@@ -71,6 +72,11 @@ import {
   updateMemory,
   updateWorkspaceRoot,
   cancelWorkPlan,
+  pauseWorkPlan,
+  continueWorkPlan,
+  approveWorkPlanStep,
+  skipWorkPlanStep,
+  updateWorkPlanSupervision,
   type ActivityRecord,
   type AgentStatus,
   type ChatMessage,
@@ -96,7 +102,9 @@ import {
   type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
+  type WorkPlanEventRecord,
   type WorkPlanRecord,
+  type WorkPlanStepRecord,
   type WorkPlanWorkerStatus,
 } from "./lib/engine";
 
