@@ -1,6 +1,6 @@
 # Phase 24 — Work Plan Supervision & Human Control
 
-Status: implemented on the Phase 24 verification branch; full CI and Windows artifact verification pending.
+Status: complete and fully verified on the Phase 24 feature branch; ready to merge to `main`.
 
 ## Objective
 
@@ -157,4 +157,22 @@ The Task plan panel now shows:
 - WorkPlanEvent does not contain new filesystem authority;
 - the original Phase 11–23 safety state machines remain authoritative.
 
-Final test count, CI run, packaged Engine 0.24.0 supervision smoke, Windows installer artifact, PR and merge SHA will be recorded after verification.
+## Verification
+
+- Feature PR: #43 — Phase 24 — Work Plan Supervision & Human Control.
+- Verified feature head: `e28407c674e9fc59462eb85403215d6ce2ff36c4`.
+- CI: Run #130, workflow run ID `34702783662`, success across Engine, desktop-web, and windows-native.
+- Engine: `169 passed, 59 warnings`; Ruff: all checks passed.
+- Packaged Engine smoke: `0.24.0`.
+- Packaged Work Plan endpoint: verified.
+- Packaged Work Plan Worker: verified.
+- Packaged Work Plan Supervision routes: verified.
+- Windows installers:
+  - `DeskAI Work_0.1.0_x64-setup.exe`
+  - `DeskAI Work_0.1.0_x64_en-US.msi`
+- Windows artifact: `DeskAI-Work-Windows`, artifact ID `10300976210`, size `394621390` bytes.
+- Artifact SHA-256: `b73e9d78c1406adeb6be440be495cf01c96b4b3286b35617cb6f14771e0396f9`.
+- Artifact created: 2026-09-12T15:51:34Z; expires: 2026-12-11T15:37:19Z.
+- No new filesystem, shell, browser, network, overwrite, delete, rollback, recovery, or unattended destructive authority was added.
+
+The final feature merge SHA will be recorded after PR #43 is merged.
