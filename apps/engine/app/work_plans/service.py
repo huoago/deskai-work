@@ -325,7 +325,7 @@ class WorkPlanService:
             plans = list(
                 session.scalars(
                     select(WorkPlan).where(
-                        WorkPlan.status.in_({"running", "cancelling"})
+                        WorkPlan.status.in_(("running", "cancelling"))
                     )
                 ).all()
             )
