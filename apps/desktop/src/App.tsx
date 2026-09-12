@@ -1173,6 +1173,173 @@ export default function App() {
       setBusy(false);
     }
   }
+  async function onPauseWorkPlan(plan: WorkPlanRecord) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await pauseWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(
+        result.status === "pausing"
+          ? "暂停请求已记录。当前工具会安全返回，随后计划停止，不会启动下一步。"
+          : "后台计划已暂停。",
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "暂停工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onContinuePausedWorkPlan(plan: WorkPlanRecord) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await continueWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(
+        result.status === "queued"
+          ? "计划已重新进入后台队列。"
+          : `计划当前状态：${result.status}`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "继续暂停计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onApproveWorkPlanStep(
+    plan: WorkPlanRecord,
+    step: WorkPlanStepRecord,
+  ) {
+    if (
+      !window.confirm(
+        `批准执行步骤 #${step.position}“${step.title}”吗？该步骤风险等级为 L${step.risk_level}，仍受原 ToolRegistry 与 PermissionGate 约束。`,
+      )
+    ) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await approveWorkPlanStep(plan.id, step.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(
+        result.status === "queued"
+          ? `步骤 #${step.position} 已批准，计划重新进入后台队列。`
+          : `步骤审批后状态：${result.status}`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "批准计划步骤失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSkipWorkPlanStep(
+    plan: WorkPlanRecord,
+    step: WorkPlanStepRecord,
+  ) {
+    const reason = window.prompt(
+      `请输入跳过步骤 #${step.position}“${step.title}”的原因。只有没有活动依赖、且不是文件提案门禁的未执行步骤可以跳过。`,
+      "",
+    );
+    if (reason === null || !reason.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await skipWorkPlanStep(plan.id, step.id, reason.trim());
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(
+        result.status === "queued"
+          ? `步骤 #${step.position} 已跳过，计划重新进入后台队列。`
+          : `步骤 #${step.position} 已跳过。`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "跳过计划步骤失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onConfigureWorkPlan(plan: WorkPlanRecord) {
+    const maxStepsRaw = window.prompt(
+      "最大自动工具步骤预算（1–100）",
+      String(plan.supervision.max_auto_steps),
+    );
+    if (maxStepsRaw === null) return;
+    const runtimeRaw = window.prompt(
+      "累计运行时间预算，秒（30–86400）",
+      String(plan.supervision.runtime_budget_seconds),
+    );
+    if (runtimeRaw === null) return;
+    const timeoutRaw = window.prompt(
+      "单步骤软超时阈值，秒（5–3600）。超时不会强杀工具，工具返回后会暂停计划。",
+      String(plan.supervision.step_timeout_seconds),
+    );
+    if (timeoutRaw === null) return;
+    const approvalRaw = window.prompt(
+      "自动步骤人工审批风险阈值（0–3；4=关闭额外审批）。例如填 2 表示 L2/L3 自动步骤执行前必须批准。",
+      String(plan.supervision.approval_risk_threshold),
+    );
+    if (approvalRaw === null) return;
+    const failureRaw = window.prompt(
+      "步骤失败策略：pause（暂停等待处理）或 stop（终止计划）",
+      plan.supervision.failure_policy,
+    );
+    if (failureRaw === null) return;
+
+    const maxSteps = Number(maxStepsRaw);
+    const runtime = Number(runtimeRaw);
+    const timeout = Number(timeoutRaw);
+    const approval = Number(approvalRaw);
+    const failure = failureRaw.trim() as "pause" | "stop";
+    if (
+      !Number.isInteger(maxSteps)
+      || !Number.isInteger(runtime)
+      || !Number.isInteger(timeout)
+      || !Number.isInteger(approval)
+      || !["pause", "stop"].includes(failure)
+    ) {
+      setNotice("监督参数格式无效，请输入整数并使用 pause/stop 失败策略。");
+      return;
+    }
+
+    setBusy(true);
+    setNotice("");
+    try {
+      await updateWorkPlanSupervision(plan.id, {
+        max_auto_steps: maxSteps,
+        runtime_budget_seconds: runtime,
+        step_timeout_seconds: timeout,
+        approval_risk_threshold: approval,
+        failure_policy: failure,
+      });
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice("计划监督参数已更新；新的预算和审批阈值从下一步骤边界生效。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "更新计划监督参数失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onAcknowledgeWorkPlanEvent(
+    plan: WorkPlanRecord,
+    event: WorkPlanEventRecord,
+  ) {
+    try {
+      await acknowledgeWorkPlanEvent(plan.id, event.id);
+      setTaskDetail(await getTask(plan.task_id));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "确认计划通知失败");
+    }
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
