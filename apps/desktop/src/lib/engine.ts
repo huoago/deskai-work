@@ -212,7 +212,18 @@ export type TaskRecord = {
   workspace_id: string | null;
   title: string;
   user_request: string;
-  status: "pending" | "running" | "completed" | "failed" | "blocked";
+  execution_mode: "agent" | "plan" | string;
+  status:
+    | "planning"
+    | "planned"
+    | "pending"
+    | "running"
+    | "awaiting_confirmation"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "cancelled"
+    | string;
   progress: number;
   result_text: string | null;
   error_message: string | null;
@@ -434,6 +445,67 @@ export type FileRecycleBatchRecord = {
   items: FileRecycleRecord[];
 };
 
+export type WorkPlanStepRecord = {
+  id: string;
+  position: number;
+  title: string;
+  description: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  dependencies: number[];
+  risk_level: number;
+  execution_mode: "auto" | "proposal_gate" | string;
+  status:
+    | "pending"
+    | "running"
+    | "awaiting_confirmation"
+    | "completed"
+    | "failed"
+    | "interrupted"
+    | "cancelled"
+    | string;
+  result_summary: string | null;
+  result: unknown;
+  tool_call_id: string | null;
+  external_entity_type: string | null;
+  external_entity_id: string | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+};
+
+export type WorkPlanRecord = {
+  id: string;
+  task_id: string;
+  workspace_id: string;
+  title: string;
+  summary: string;
+  limitations: string[];
+  status:
+    | "ready"
+    | "running"
+    | "awaiting_confirmation"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "paused"
+    | "cancelled"
+    | string;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  progress: number;
+  requires_confirmation: boolean;
+  can_start: boolean;
+  can_resume: boolean;
+  can_retry: boolean;
+  can_cancel: boolean;
+  steps: WorkPlanStepRecord[];
+};
+
 export type TaskDetail = TaskRecord & {
   runs: AgentRunRecord[];
   tool_calls: AgentToolCallRecord[];
@@ -444,6 +516,7 @@ export type TaskDetail = TaskRecord & {
   file_operation_batches: FileOrganizationBatchRecord[];
   recycle_proposals: FileRecycleRecord[];
   recycle_batches: FileRecycleBatchRecord[];
+  work_plans: WorkPlanRecord[];
 };
 
 export type AgentStatus = {
@@ -847,14 +920,50 @@ export function listTasks(workspaceId?: string): Promise<TaskRecord[]> {
   return request<TaskRecord[]>(`/tasks${suffix}`);
 }
 
-export function createTask(workspaceId: string, userRequest: string, title?: string): Promise<TaskRecord> {
+export function createTask(
+  workspaceId: string,
+  userRequest: string,
+  title?: string,
+  executionMode: "agent" | "plan" = "agent",
+): Promise<TaskRecord> {
   return request<TaskRecord>("/tasks", {
     method: "POST",
     body: JSON.stringify({
       workspace_id: workspaceId,
       request: userRequest,
       title: title || null,
+      execution_mode: executionMode,
     }),
+  });
+}
+
+export function draftWorkPlan(taskId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/tasks/${encodeURIComponent(taskId)}/work-plan`, {
+    method: "POST",
+  });
+}
+
+export function startWorkPlan(planId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/start`, {
+    method: "POST",
+  });
+}
+
+export function resumeWorkPlan(planId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/resume`, {
+    method: "POST",
+  });
+}
+
+export function retryWorkPlan(planId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/retry`, {
+    method: "POST",
+  });
+}
+
+export function cancelWorkPlan(planId: string): Promise<WorkPlanRecord> {
+  return request<WorkPlanRecord>(`/work-plans/${encodeURIComponent(planId)}/cancel`, {
+    method: "POST",
   });
 }
 
