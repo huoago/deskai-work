@@ -45,7 +45,7 @@ class WorkPlanWorkerSnapshot:
 
 
 class WorkPlanWorker:
-    """Background runner for persistent Phase 23 work plans."""
+    """Background runner for persistent supervised work plans."""
 
     def __init__(self, database, service, *, interval_seconds: float = 1.0) -> None:
         self.database = database
