@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.database.models import Chunk, File, FileVersion
 from app.database.session import Database
 from app.knowledge.chunking import build_chunks
-from app.knowledge.embedding import EMBEDDING_PROVIDER, embed_text
+from app.knowledge.embedding import EmbeddingService
 from app.knowledge.fts import replace_file_fts
 from app.knowledge.vector_store import LanceVectorStore
 from app.parsing.cache import ParsedDocumentCache
@@ -28,6 +28,8 @@ class KnowledgeSnapshot:
     last_file_id: str | None
     last_completed_at: str | None
     last_error: str | None
+    embedding_provider: str
+    embedding_semantic: bool
 
     def as_dict(self) -> dict:
         return {
@@ -37,12 +39,13 @@ class KnowledgeSnapshot:
             "last_file_id": self.last_file_id,
             "last_completed_at": self.last_completed_at,
             "last_error": self.last_error,
-            "embedding_provider": EMBEDDING_PROVIDER,
+            "embedding_provider": self.embedding_provider,
+            "embedding_semantic": self.embedding_semantic,
         }
 
 
 class KnowledgeIndexer:
-    """Turns Phase 3 parsed documents into Phase 4 retrieval indexes."""
+    """Turns parsed documents into FTS and provider-versioned vector indexes."""
 
     def __init__(
         self,
@@ -50,11 +53,13 @@ class KnowledgeIndexer:
         data_dir: Path,
         vector_path: Path,
         *,
+        embedding_service: EmbeddingService | None = None,
         interval_seconds: float = 1.0,
     ) -> None:
         self.database = database
         self.cache = ParsedDocumentCache(data_dir)
         self.vector_store = LanceVectorStore(vector_path)
+        self.embedding_service = embedding_service or EmbeddingService()
         self.interval_seconds = max(interval_seconds, 0.25)
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -91,6 +96,7 @@ class KnowledgeIndexer:
 
     def snapshot(self) -> KnowledgeSnapshot:
         thread = self._thread
+        descriptor = self.embedding_service.descriptor()
         with self._lock:
             return KnowledgeSnapshot(
                 running=bool(thread and thread.is_alive() and not self._stop.is_set()),
@@ -99,6 +105,8 @@ class KnowledgeIndexer:
                 last_file_id=self._last_file_id,
                 last_completed_at=self._last_completed_at,
                 last_error=self._last_error,
+                embedding_provider=descriptor.signature,
+                embedding_semantic=descriptor.semantic,
             )
 
     def process_available(self, limit: int = 20) -> int:
@@ -122,9 +130,14 @@ class KnowledgeIndexer:
                     raise FileNotFoundError(f"Parsed cache is missing for {filename}")
 
                 drafts = build_chunks(parsed)
+                descriptor = self.embedding_service.descriptor()
+                vectors = self.embedding_service.embed_documents([draft.content for draft in drafts])
+                if len(vectors) != len(drafts):
+                    raise RuntimeError("Embedding count did not match chunk count")
+
                 chunk_rows: list[Chunk] = []
                 vector_rows: list[dict] = []
-                for index, draft in enumerate(drafts):
+                for index, (draft, vector) in enumerate(zip(drafts, vectors, strict=True)):
                     chunk_id = str(uuid.uuid4())
                     row = Chunk(
                         id=chunk_id,
@@ -154,15 +167,16 @@ class KnowledgeIndexer:
                             "file_version_id": version_id,
                             "filename": filename,
                             "content": draft.content,
-                            "embedding_provider": EMBEDDING_PROVIDER,
-                            "vector": embed_text(draft.content),
+                            "embedding_provider": descriptor.signature,
+                            "vector": vector,
                         }
                     )
 
-                # LanceDB is replaced first. If the following SQLite transaction
-                # fails, the vector rows are harmless because search cross-checks
-                # each hit against the authoritative SQLite current-version state.
-                self.vector_store.replace_file(file_id, vector_rows)
+                self.vector_store.replace_file(
+                    file_id,
+                    vector_rows,
+                    provider_signature=descriptor.signature,
+                )
                 self._commit_index(
                     file_id=file_id,
                     version_id=version_id,
@@ -175,6 +189,64 @@ class KnowledgeIndexer:
                 self._mark_failed(file_id, version_id, exc)
                 self._record_failure(file_id, exc)
             return True
+
+    def rebuild_embeddings(self, workspace_id: str | None = None, file_limit: int = 20) -> dict[str, object]:
+        """Backfill the currently selected vector provider from authoritative active chunks.
+
+        This does not reparse files or change FTS/current-version state. It is safe to
+        run incrementally after switching embedding providers.
+        """
+        descriptor = self.embedding_service.descriptor()
+        with self.database.session() as session:
+            file_query = select(File).where(File.status == "indexed")
+            if workspace_id:
+                file_query = file_query.where(File.workspace_id == workspace_id)
+            files = list(session.scalars(file_query.order_by(File.updated_at, File.id).limit(file_limit)).all())
+            payloads: list[tuple[str, str, list[tuple[Chunk, str]]]] = []
+            for file in files:
+                chunks = list(
+                    session.scalars(
+                        select(Chunk)
+                        .where(
+                            Chunk.file_id == file.id,
+                            Chunk.active.is_(True),
+                            Chunk.file_version_id == file.current_version_id,
+                        )
+                        .order_by(Chunk.chunk_index)
+                    ).all()
+                )
+                payloads.append((file.id, file.filename, [(chunk, chunk.content) for chunk in chunks]))
+
+        rebuilt = 0
+        chunks_written = 0
+        for file_id, filename, chunk_payload in payloads:
+            if not chunk_payload:
+                continue
+            vectors = self.embedding_service.embed_documents([content for _, content in chunk_payload])
+            rows = []
+            for (chunk, content), vector in zip(chunk_payload, vectors, strict=True):
+                rows.append(
+                    {
+                        "chunk_id": chunk.id,
+                        "workspace_id": chunk.workspace_id,
+                        "file_id": chunk.file_id,
+                        "file_version_id": chunk.file_version_id,
+                        "filename": filename,
+                        "content": content,
+                        "embedding_provider": descriptor.signature,
+                        "vector": vector,
+                    }
+                )
+            self.vector_store.replace_file(file_id, rows, provider_signature=descriptor.signature)
+            rebuilt += 1
+            chunks_written += len(rows)
+        return {
+            "provider": descriptor.as_dict(),
+            "files_rebuilt": rebuilt,
+            "chunks_written": chunks_written,
+            "file_limit": file_limit,
+            "workspace_id": workspace_id,
+        }
 
     def retry_file(self, file_id: str) -> bool:
         with self.database.session() as session:
