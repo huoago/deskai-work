@@ -482,6 +482,62 @@ export type RecoveryDiagnostic = {
   automatic_repair_available: boolean;
 };
 
+export type RecoveryPathObservation = {
+  role: string;
+  path: string | null;
+  exists: boolean;
+  is_file: boolean;
+  is_symlink: boolean;
+  size: number | null;
+  sha256: string | null;
+  matches: string[];
+  error: string | null;
+};
+
+export type RecoverySnapshotMember = {
+  id: string;
+  filename: string;
+  tracked_path: string | null;
+  tracked_file_status: string | null;
+  state: string;
+  supporting_evidence_valid: boolean;
+  technical_action_ready: boolean;
+  observations: RecoveryPathObservation[];
+};
+
+export type RecoverySnapshotAssessment = {
+  state: string;
+  member_states?: string[];
+  safe_state_detected: boolean;
+  technical_action_preconditions_satisfied: boolean;
+  safe_to_retry_existing_action: boolean;
+  action_after_reconciliation: "rollback" | "restore" | null;
+  requires_operator_reconciliation: boolean;
+  reason: string;
+};
+
+export type RecoverySnapshotAuditEvent = {
+  timestamp: string;
+  action: string;
+  target: string | null;
+  result: string | null;
+  risk_level: number;
+};
+
+export type RecoverySnapshot = {
+  entity_type: string;
+  transaction_id: string;
+  task_id: string;
+  workspace_id: string;
+  transactional: boolean;
+  captured_at: string;
+  persisted_status: "recovery_required";
+  read_only: boolean;
+  members: RecoverySnapshotMember[];
+  assessment: RecoverySnapshotAssessment;
+  audit_timeline: RecoverySnapshotAuditEvent[];
+};
+
 export type RecoveryEntry = {
   id: string;
   entity_type:
@@ -858,6 +914,15 @@ export function listRecovery(workspaceId?: string, limit = 300): Promise<Recover
   if (workspaceId) params.set("workspace_id", workspaceId);
   params.set("limit", String(limit));
   return request<RecoveryEntry[]>(`/recovery?${params.toString()}`);
+}
+
+export function getRecoverySnapshot(
+  entityType: string,
+  transactionId: string,
+): Promise<RecoverySnapshot> {
+  return request<RecoverySnapshot>(
+    `/recovery/${encodeURIComponent(entityType)}/${encodeURIComponent(transactionId)}/snapshot`,
+  );
 }
 
 export function listGeneratedArtifacts(workspaceId?: string, taskId?: string): Promise<GeneratedArtifactRecord[]> {
