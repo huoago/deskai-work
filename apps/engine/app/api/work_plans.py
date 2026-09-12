@@ -1,10 +1,23 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 router = APIRouter(tags=["work-plans"])
+
+
+class WorkPlanSupervisionUpdate(BaseModel):
+    max_auto_steps: int | None = Field(default=None, ge=1, le=100)
+    runtime_budget_seconds: int | None = Field(default=None, ge=30, le=86400)
+    step_timeout_seconds: int | None = Field(default=None, ge=5, le=3600)
+    failure_policy: Literal["pause", "stop"] | None = None
+    approval_risk_threshold: int | None = Field(default=None, ge=0, le=4)
+
+
+class WorkPlanSkipRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 def _raise_api_error(exc: ValueError) -> None:
@@ -42,6 +55,135 @@ def process_work_plan_queue(
         "processed": processed,
         "worker": request.app.state.work_plan_worker.snapshot().as_dict(),
     }
+
+
+@router.get("/work-plans/{plan_id}/events")
+def list_work_plan_events(
+    plan_id: str,
+    request: Request,
+    unread_only: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=500),
+) -> list[dict[str, Any]]:
+    try:
+        return request.app.state.work_plan_service.list_events(
+            plan_id,
+            unread_only=unread_only,
+            limit=limit,
+        )
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.get("/work-plans/{plan_id}/notifications")
+def list_work_plan_notifications(
+    plan_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[dict[str, Any]]:
+    try:
+        events = request.app.state.work_plan_service.list_events(
+            plan_id,
+            unread_only=True,
+            limit=limit,
+        )
+        return [
+            item
+            for item in events
+            if item.get("severity") in {"warning", "action"}
+        ]
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/work-plans/{plan_id}/events/{event_id}/acknowledge")
+def acknowledge_work_plan_event(
+    plan_id: str,
+    event_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        return request.app.state.work_plan_service.acknowledge_event(
+            plan_id,
+            event_id,
+        )
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.patch("/work-plans/{plan_id}/supervision")
+def update_work_plan_supervision(
+    plan_id: str,
+    payload: WorkPlanSupervisionUpdate,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        return request.app.state.work_plan_service.update_supervision(
+            plan_id,
+            max_auto_steps=payload.max_auto_steps,
+            runtime_budget_seconds=payload.runtime_budget_seconds,
+            step_timeout_seconds=payload.step_timeout_seconds,
+            failure_policy=payload.failure_policy,
+            approval_risk_threshold=payload.approval_risk_threshold,
+        )
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/work-plans/{plan_id}/pause")
+def pause_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
+    try:
+        return request.app.state.work_plan_service.pause(plan_id)
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/work-plans/{plan_id}/continue")
+def continue_work_plan(plan_id: str, request: Request) -> dict[str, Any]:
+    try:
+        result = request.app.state.work_plan_service.continue_plan(plan_id)
+        if result.get("status") == "queued":
+            request.app.state.work_plan_worker.wake()
+        return result
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/work-plans/{plan_id}/steps/{step_id}/approve")
+def approve_work_plan_step(
+    plan_id: str,
+    step_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        result = request.app.state.work_plan_service.approve_step(
+            plan_id,
+            step_id,
+        )
+        if result.get("status") == "queued":
+            request.app.state.work_plan_worker.wake()
+        return result
+    except ValueError as exc:
+        _raise_api_error(exc)
+
+
+@router.post("/work-plans/{plan_id}/steps/{step_id}/skip")
+def skip_work_plan_step(
+    plan_id: str,
+    step_id: str,
+    payload: WorkPlanSkipRequest,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        result = request.app.state.work_plan_service.skip_step(
+            plan_id,
+            step_id,
+            reason=payload.reason,
+        )
+        if result.get("status") == "queued":
+            request.app.state.work_plan_worker.wake()
+        return result
+    except ValueError as exc:
+        _raise_api_error(exc)
 
 
 @router.get("/work-plans/{plan_id}")
