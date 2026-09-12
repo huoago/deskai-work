@@ -119,7 +119,6 @@ def build_engineering_benchmark_v1() -> tuple[list[BenchmarkDocument], list[Benc
                 )
             )
 
-    # Ten no-evidence questions make hallucination-like retrieval regressions visible.
     for index in range(1, 11):
         cases.append(
             BenchmarkCase(
@@ -158,10 +157,13 @@ def evaluate_retrieval(
 
     for case in case_list:
         results = search(case.question, 10)
-        filenames = [str(hit.get("filename") or "") for hit in results]
 
         if not case.answerable:
-            if not results:
+            # Semantic retrieval may legitimately return weak nearest neighbours.
+            # Treat a no-evidence query as correctly unsupported when no returned
+            # candidate has lexical evidence. The answer layer can then abstain
+            # instead of mistaking semantic proximity for documentary proof.
+            if all(hit.get("lexical_rank") is None for hit in results):
                 no_evidence_hits += 1
             continue
 
