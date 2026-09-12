@@ -195,7 +195,8 @@ class WorkPlanWorker:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            processed = self.process_available(limit=2)
-            if processed == 0:
-                self._wake.wait(self.interval_seconds)
-                self._wake.clear()
+            processed = self.process_available(limit=3)
+            if processed:
+                continue
+            self._wake.wait(self.interval_seconds)
+            self._wake.clear()
