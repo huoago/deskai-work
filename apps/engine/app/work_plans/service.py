@@ -1,0 +1,1058 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import select
+
+from app.api.settings import DEFAULTS
+from app.database.models import (
+    AgentRun,
+    AuditLog,
+    File,
+    Setting,
+    Task,
+    WorkPlan,
+    WorkPlanStep,
+)
+from app.database.session import Database
+
+REFERENCE_RE = re.compile(
+    r"\{\{step:(\d+)\.result(?:\.([A-Za-z0-9_.-]+))?\}\}"
+)
+
+PROPOSAL_ENTITY_TYPES = {
+    "propose_source_file_edit": "source_edit",
+    "propose_source_file_edit_batch": "source_edit_batch",
+    "propose_file_organization": "file_organization",
+    "propose_file_organization_batch": "file_organization_batch",
+    "propose_file_recycle": "file_recycle",
+    "propose_file_recycle_batch": "file_recycle_batch",
+}
+
+
+class WorkPlanService:
+    """Persistent, dependency-aware orchestration over the existing safe ToolRegistry."""
+
+    def __init__(
+        self,
+        database: Database,
+        secret_store,
+        provider,
+        tool_registry,
+        source_edit_service,
+        source_edit_batch_service,
+        file_organization_service,
+        file_organization_batch_service,
+        file_recycle_service,
+        file_recycle_batch_service,
+    ) -> None:
+        self.database = database
+        self.secret_store = secret_store
+        self.provider = provider
+        self.tool_registry = tool_registry
+        self.source_edit_service = source_edit_service
+        self.source_edit_batch_service = source_edit_batch_service
+        self.file_organization_service = file_organization_service
+        self.file_organization_batch_service = file_organization_batch_service
+        self.file_recycle_service = file_recycle_service
+        self.file_recycle_batch_service = file_recycle_batch_service
+
+    def draft(self, task_id: str) -> dict[str, Any]:
+        claim = self._task_claim(task_id)
+        if claim["execution_mode"] != "plan":
+            raise ValueError("Only plan-mode tasks can draft a persistent work plan")
+
+        existing = self.list(task_id=task_id, limit=10)
+        if existing:
+            return existing[0]
+
+        if claim["privacy_mode"] == "local":
+            self._planning_failed(task_id, "Local Only mode has no local planning model configured")
+            raise ValueError("Local Only mode has no local planning model configured")
+        api_key = self.secret_store.get_openai_api_key()
+        if not api_key:
+            self._planning_failed(task_id, "Work-plan drafting requires a configured OpenAI API key")
+            raise ValueError("Work-plan drafting requires a configured OpenAI API key")
+
+        catalog = self.tool_registry.planning_catalog(
+            workspace_id=claim["workspace_id"],
+        )
+        if not catalog:
+            self._planning_failed(task_id, "No permitted tools are available for work-plan drafting")
+            raise ValueError("No permitted tools are available for work-plan drafting")
+
+        workspace_context = self._workspace_context(claim["workspace_id"])
+        try:
+            raw = asyncio.run(
+                self.provider.draft_work_plan(
+                    api_key=api_key,
+                    model=claim["model"],
+                    reasoning_effort=claim["reasoning_effort"],
+                    user_request=claim["user_request"],
+                    tool_catalog=catalog,
+                    workspace_context=workspace_context,
+                )
+            )
+            normalized = self._normalize_plan(raw, catalog)
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"[:4000]
+            self._planning_failed(task_id, message)
+            raise ValueError(message) from exc
+
+        plan = WorkPlan(
+            task_id=task_id,
+            workspace_id=claim["workspace_id"],
+            title=normalized["title"],
+            summary=normalized["summary"],
+            limitations_json=normalized["limitations"],
+            status="ready",
+        )
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is None:
+                raise ValueError("Task not found")
+            if task.execution_mode != "plan":
+                raise ValueError("Task execution mode changed during planning")
+            session.add(plan)
+            session.flush()
+            for item in normalized["steps"]:
+                session.add(
+                    WorkPlanStep(
+                        plan_id=plan.id,
+                        position=item["position"],
+                        title=item["title"],
+                        description=item["description"],
+                        tool_name=item["tool_name"],
+                        arguments_json=item["arguments"],
+                        dependencies_json=item["dependencies"],
+                        risk_level=item["risk_level"],
+                        execution_mode=item["execution_mode"],
+                        status="pending",
+                    )
+                )
+            task.status = "planned"
+            task.progress = 0.08
+            task.error_message = None
+            session.add(
+                AuditLog(
+                    task_id=task_id,
+                    action="work_plan_drafted",
+                    target=plan.id,
+                    result=(
+                        f"steps={len(normalized['steps'])}; "
+                        f"max_risk={max(item['risk_level'] for item in normalized['steps'])}; "
+                        "filesystem_mutation=false"
+                    ),
+                    risk_level=max(item["risk_level"] for item in normalized["steps"]),
+                )
+            )
+        return self.get(plan.id)
+
+    def start(self, plan_id: str) -> dict[str, Any]:
+        plan = self._plan_record(plan_id)
+        if plan.status != "ready":
+            raise ValueError("Only a ready work plan can be started")
+        return self._advance(plan_id, event="work_plan_started")
+
+    def resume(self, plan_id: str) -> dict[str, Any]:
+        plan = self._plan_record(plan_id)
+        if plan.status != "awaiting_confirmation":
+            raise ValueError("Work plan is not waiting for a confirmation gate")
+
+        gate = self._awaiting_gate(plan_id)
+        if gate is None:
+            raise ValueError("Work plan has no pending confirmation step")
+        state = self._proposal_state(gate.tool_name, str(gate.external_entity_id or ""))
+        accepted = self._accepted_proposal_status(gate.tool_name)
+        if state == accepted:
+            now = datetime.now(timezone.utc)
+            with self.database.session() as session:
+                step = session.get(WorkPlanStep, gate.id)
+                plan_row = session.get(WorkPlan, plan_id)
+                task = session.get(Task, plan.task_id)
+                if step is None or plan_row is None:
+                    raise ValueError("Work plan disappeared")
+                step.status = "completed"
+                step.completed_at = now
+                step.error_message = None
+                step.result_summary = (
+                    (step.result_summary or "")
+                    + f" | human_confirmation_status={state}"
+                )[:4000]
+                plan_row.status = "running"
+                plan_row.error_message = None
+                if task is not None:
+                    task.status = "running"
+                    task.error_message = None
+                session.add(
+                    AuditLog(
+                        task_id=plan.task_id,
+                        action="work_plan_confirmation_observed",
+                        target=step.id,
+                        result=(
+                            f"tool={step.tool_name}; entity={step.external_entity_type}; "
+                            f"entity_id={step.external_entity_id}; status={state}"
+                        ),
+                        risk_level=step.risk_level,
+                    )
+                )
+            return self._advance(plan_id, event="work_plan_resumed")
+
+        if state == "pending":
+            raise ValueError("The existing file proposal is still waiting for human confirmation")
+
+        self._block_after_gate(
+            plan_id,
+            gate.id,
+            (
+                f"Required proposal did not reach {accepted}; current status={state}. "
+                "DeskAI will not automatically re-plan around a rejected or ambiguous file action."
+            ),
+        )
+        return self.get(plan_id)
+
+    def retry(self, plan_id: str) -> dict[str, Any]:
+        plan = self._plan_record(plan_id)
+        if plan.status not in {"failed", "paused"}:
+            raise ValueError("Only failed or paused work plans can retry a step")
+
+        with self.database.session() as session:
+            steps = list(
+                session.scalars(
+                    select(WorkPlanStep)
+                    .where(WorkPlanStep.plan_id == plan_id)
+                    .order_by(WorkPlanStep.position)
+                ).all()
+            )
+            step = next(
+                (item for item in steps if item.status in {"failed", "interrupted"}),
+                None,
+            )
+            if step is None:
+                raise ValueError("No failed/interrupted work-plan step is available to retry")
+            if step.external_entity_id:
+                raise ValueError(
+                    "A step that already created a file proposal cannot be retried automatically"
+                )
+            step.status = "pending"
+            step.error_message = None
+            step.result_summary = None
+            step.result_json = None
+            step.tool_call_id = None
+            step.started_at = None
+            step.completed_at = None
+
+            plan_row = session.get(WorkPlan, plan_id)
+            task = session.get(Task, plan.task_id)
+            if plan_row is not None:
+                plan_row.status = "running"
+                plan_row.error_message = None
+            if task is not None:
+                task.status = "running"
+                task.error_message = None
+                task.completed_at = None
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    action="work_plan_retry_requested",
+                    target=step.id,
+                    result=f"position={step.position}; tool={step.tool_name}",
+                    risk_level=step.risk_level,
+                )
+            )
+        return self._advance(plan_id, event="work_plan_retried")
+
+    def cancel(self, plan_id: str) -> dict[str, Any]:
+        plan = self._plan_record(plan_id)
+        if plan.status in {"completed", "cancelled"}:
+            raise ValueError("Work plan is already finished")
+
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan_row = session.get(WorkPlan, plan_id)
+            if plan_row is None:
+                raise ValueError("Work plan not found")
+            steps = list(
+                session.scalars(
+                    select(WorkPlanStep).where(WorkPlanStep.plan_id == plan_id)
+                ).all()
+            )
+            preserved = []
+            for step in steps:
+                if step.status in {
+                    "pending",
+                    "running",
+                    "awaiting_confirmation",
+                    "failed",
+                    "interrupted",
+                }:
+                    if step.external_entity_id:
+                        preserved.append(f"{step.external_entity_type}:{step.external_entity_id}")
+                    step.status = "cancelled"
+                    step.completed_at = now
+            plan_row.status = "cancelled"
+            plan_row.cancelled_at = now
+            plan_row.completed_at = now
+            plan_row.error_message = None
+
+            task = session.get(Task, plan_row.task_id)
+            if task is not None:
+                task.status = "cancelled"
+                task.completed_at = now
+                task.error_message = None
+
+            session.add(
+                AuditLog(
+                    task_id=plan_row.task_id,
+                    action="work_plan_cancelled",
+                    target=plan_id,
+                    result=(
+                        "Pending execution stopped; existing proposals preserved="
+                        + (",".join(preserved) if preserved else "none")
+                    ),
+                    risk_level=0,
+                )
+            )
+        return self.get(plan_id)
+
+    def recover_interrupted(self) -> int:
+        now = datetime.now(timezone.utc)
+        recovered = 0
+        with self.database.session() as session:
+            plans = list(
+                session.scalars(
+                    select(WorkPlan).where(WorkPlan.status == "running")
+                ).all()
+            )
+            for plan in plans:
+                recovered += 1
+                plan.status = "paused"
+                plan.error_message = (
+                    "Engine stopped during work-plan execution. "
+                    "The current step was not automatically repeated; explicit retry is required."
+                )
+                steps = list(
+                    session.scalars(
+                        select(WorkPlanStep).where(WorkPlanStep.plan_id == plan.id)
+                    ).all()
+                )
+                for step in steps:
+                    if step.status == "running":
+                        step.status = "interrupted"
+                        step.error_message = "Interrupted before DeskAI could prove step completion"
+                task = session.get(Task, plan.task_id)
+                if task is not None:
+                    task.status = "blocked"
+                    task.error_message = plan.error_message
+                session.add(
+                    AuditLog(
+                        task_id=plan.task_id,
+                        action="work_plan_interrupted",
+                        target=plan.id,
+                        result=plan.error_message,
+                        risk_level=0,
+                    )
+                )
+
+            runs = list(
+                session.scalars(
+                    select(AgentRun).where(
+                        AgentRun.status == "running",
+                        AgentRun.model == "work-plan-executor",
+                    )
+                ).all()
+            )
+            for run in runs:
+                run.status = "interrupted"
+                run.completed_at = now
+        return recovered
+
+    def list(
+        self,
+        *,
+        workspace_id: str | None = None,
+        task_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        with self.database.session() as session:
+            statement = (
+                select(WorkPlan)
+                .order_by(WorkPlan.created_at.desc())
+                .limit(max(1, min(int(limit), 500)))
+            )
+            if workspace_id:
+                statement = statement.where(WorkPlan.workspace_id == workspace_id)
+            if task_id:
+                statement = statement.where(WorkPlan.task_id == task_id)
+            plans = list(session.scalars(statement).all())
+            return [self._payload(session, plan) for plan in plans]
+
+    def get(self, plan_id: str) -> dict[str, Any]:
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None:
+                raise ValueError("Work plan not found")
+            return self._payload(session, plan)
+
+    def _advance(self, plan_id: str, *, event: str) -> dict[str, Any]:
+        plan = self._plan_record(plan_id)
+        run_id = self._start_execution(plan_id, event=event)
+        try:
+            for _ in range(12):
+                plan = self._plan_record(plan_id)
+                with self.database.session() as session:
+                    steps = list(
+                        session.scalars(
+                            select(WorkPlanStep)
+                            .where(WorkPlanStep.plan_id == plan_id)
+                            .order_by(WorkPlanStep.position)
+                        ).all()
+                    )
+                    completed = {step.position for step in steps if step.status == "completed"}
+                    if steps and len(completed) == len(steps):
+                        self._complete(plan_id, run_id)
+                        return self.get(plan_id)
+
+                    waiting = next(
+                        (step for step in steps if step.status == "awaiting_confirmation"),
+                        None,
+                    )
+                    if waiting is not None:
+                        self._finish_run(run_id, "awaiting_confirmation")
+                        return self.get(plan_id)
+
+                    step = next(
+                        (
+                            item
+                            for item in steps
+                            if item.status == "pending"
+                            and set(int(value) for value in (item.dependencies_json or []))
+                            .issubset(completed)
+                        ),
+                        None,
+                    )
+                    if step is None:
+                        raise RuntimeError("Work plan has pending steps with unsatisfied dependencies")
+                    step_id = step.id
+
+                self._execute_step(plan_id, step_id, run_id)
+                current = self.get(plan_id)
+                if current["status"] in {"awaiting_confirmation", "failed", "blocked"}:
+                    return current
+
+            raise RuntimeError("Work plan exceeded the 12-step execution limit")
+        except Exception as exc:
+            self._fail(plan_id, run_id, f"{type(exc).__name__}: {exc}")
+            return self.get(plan_id)
+
+    def _execute_step(self, plan_id: str, step_id: str, run_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            step = session.get(WorkPlanStep, step_id)
+            if plan is None or step is None:
+                raise RuntimeError("Work plan step disappeared")
+            step.status = "running"
+            step.started_at = now
+            arguments = self._resolve_arguments(session, step)
+            task_id = plan.task_id
+            workspace_id = plan.workspace_id
+            tool_name = step.tool_name
+            execution_mode = step.execution_mode
+            risk_level = step.risk_level
+
+        result = self.tool_registry.execute(
+            agent_run_id=run_id,
+            task_id=task_id,
+            workspace_id=workspace_id,
+            tool_name=tool_name,
+            arguments=arguments,
+        )
+        if not result.get("ok"):
+            message = str(result.get("error") or "Tool execution failed")
+            self._fail_step(plan_id, step_id, run_id, message)
+            return
+
+        actual = result.get("result")
+        summary = json.dumps(actual, ensure_ascii=False, separators=(",", ":"), default=str)[:4000]
+        tool_call_id = str(result.get("tool_call_id") or "") or None
+
+        if execution_mode == "proposal_gate":
+            if not isinstance(actual, dict) or not actual.get("id"):
+                self._fail_step(
+                    plan_id,
+                    step_id,
+                    run_id,
+                    "Proposal tool did not return a persistent proposal id",
+                )
+                return
+            external_type = PROPOSAL_ENTITY_TYPES.get(tool_name)
+            if not external_type:
+                self._fail_step(plan_id, step_id, run_id, "Unknown proposal-gate tool")
+                return
+            with self.database.session() as session:
+                plan_row = session.get(WorkPlan, plan_id)
+                step = session.get(WorkPlanStep, step_id)
+                task = session.get(Task, task_id)
+                if plan_row is None or step is None:
+                    raise RuntimeError("Work plan disappeared after proposal creation")
+                step.status = "awaiting_confirmation"
+                step.result_summary = summary
+                step.result_json = actual
+                step.tool_call_id = tool_call_id
+                step.external_entity_type = external_type
+                step.external_entity_id = str(actual["id"])
+                plan_row.status = "awaiting_confirmation"
+                plan_row.error_message = None
+                if task is not None:
+                    task.status = "awaiting_confirmation"
+                    task.progress = self._task_progress(session, plan_id)
+                    task.error_message = (
+                        "Work plan paused at an existing file-transaction confirmation gate"
+                    )
+                session.add(
+                    AuditLog(
+                        task_id=task_id,
+                        agent_run_id=run_id,
+                        action="work_plan_waiting_confirmation",
+                        target=step_id,
+                        result=(
+                            f"tool={tool_name}; entity_type={external_type}; "
+                            f"entity_id={actual['id']}; automatic_file_mutation=false"
+                        ),
+                        risk_level=risk_level,
+                    )
+                )
+            self._finish_run(run_id, "awaiting_confirmation")
+            return
+
+        with self.database.session() as session:
+            step = session.get(WorkPlanStep, step_id)
+            task = session.get(Task, task_id)
+            if step is None:
+                raise RuntimeError("Work plan step disappeared after tool execution")
+            step.status = "completed"
+            step.completed_at = datetime.now(timezone.utc)
+            step.result_summary = summary
+            step.result_json = actual
+            step.tool_call_id = tool_call_id
+            step.error_message = None
+            if task is not None:
+                task.progress = self._task_progress(session, plan_id)
+            session.add(
+                AuditLog(
+                    task_id=task_id,
+                    agent_run_id=run_id,
+                    action="work_plan_step_completed",
+                    target=step_id,
+                    result=f"position={step.position}; tool={tool_name}",
+                    risk_level=risk_level,
+                )
+            )
+
+    def _resolve_arguments(self, session, step: WorkPlanStep) -> dict[str, Any]:
+        dependencies = {int(value) for value in (step.dependencies_json or [])}
+        prior = {
+            item.position: item
+            for item in session.scalars(
+                select(WorkPlanStep).where(
+                    WorkPlanStep.plan_id == step.plan_id,
+                    WorkPlanStep.position.in_(dependencies) if dependencies else False,
+                )
+            ).all()
+        }
+
+        def lookup(position: int, path: str | None) -> Any:
+            if position not in dependencies:
+                raise ValueError(
+                    f"Step {step.position} references step {position} without declaring it as a dependency"
+                )
+            source = prior.get(position)
+            if source is None or source.status != "completed":
+                raise ValueError(f"Dependency step {position} is not completed")
+            value: Any = source.result_json
+            if path:
+                for token in path.split("."):
+                    if isinstance(value, list):
+                        try:
+                            value = value[int(token)]
+                        except (ValueError, IndexError) as exc:
+                            raise ValueError(
+                                f"Invalid list path in step reference: {path}"
+                            ) from exc
+                    elif isinstance(value, dict) and token in value:
+                        value = value[token]
+                    else:
+                        raise ValueError(f"Missing value in step reference: {path}")
+            return value
+
+        def resolve(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: resolve(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [resolve(item) for item in value]
+            if not isinstance(value, str):
+                return value
+
+            matches = list(REFERENCE_RE.finditer(value))
+            if not matches:
+                return value
+            if len(matches) == 1 and matches[0].span() == (0, len(value)):
+                match = matches[0]
+                return lookup(int(match.group(1)), match.group(2))
+
+            output = value
+            for match in matches:
+                resolved = lookup(int(match.group(1)), match.group(2))
+                replacement = (
+                    resolved
+                    if isinstance(resolved, str)
+                    else json.dumps(resolved, ensure_ascii=False, separators=(",", ":"), default=str)
+                )
+                output = output.replace(match.group(0), str(replacement))
+            return output
+
+        resolved = resolve(step.arguments_json)
+        if not isinstance(resolved, dict):
+            raise ValueError("Resolved work-plan tool arguments must be an object")
+        return resolved
+
+    def _normalize_plan(
+        self,
+        raw: dict[str, Any],
+        catalog: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not isinstance(raw, dict):
+            raise ValueError("Planner output must be an object")
+        raw_steps = raw.get("steps")
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 12:
+            raise ValueError("Work plan must contain between 1 and 12 steps")
+
+        tools = {str(item["name"]): item for item in catalog}
+        steps: list[dict[str, Any]] = []
+        for position, raw_step in enumerate(raw_steps, start=1):
+            if not isinstance(raw_step, dict):
+                raise ValueError("Every work-plan step must be an object")
+            tool_name = str(raw_step.get("tool_name") or "")
+            metadata = tools.get(tool_name)
+            if metadata is None:
+                raise ValueError(f"Planner selected unavailable tool: {tool_name}")
+
+            raw_arguments = raw_step.get("arguments_json")
+            if not isinstance(raw_arguments, str):
+                raise ValueError("arguments_json must be a JSON string")
+            try:
+                arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Step {position} arguments_json is invalid: {exc}"
+                ) from exc
+            if not isinstance(arguments, dict):
+                raise ValueError("Each step's arguments_json must decode to an object")
+
+            raw_dependencies = raw_step.get("depends_on_positions") or []
+            if not isinstance(raw_dependencies, list):
+                raise ValueError("depends_on_positions must be a list")
+            dependencies = sorted({int(value) for value in raw_dependencies})
+            if any(value < 1 or value >= position for value in dependencies):
+                raise ValueError(
+                    f"Step {position} dependencies must point only to earlier steps"
+                )
+
+            self._validate_references(arguments, position, set(dependencies))
+            steps.append(
+                {
+                    "position": position,
+                    "title": str(raw_step.get("title") or f"Step {position}")[:1024],
+                    "description": str(raw_step.get("description") or "")[:4000],
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "dependencies": dependencies,
+                    "risk_level": int(metadata["risk_level"]),
+                    "execution_mode": str(metadata["execution_mode"]),
+                }
+            )
+
+        limitations = raw.get("limitations") or []
+        if not isinstance(limitations, list):
+            limitations = []
+        return {
+            "title": str(raw.get("plan_title") or "DeskAI work plan")[:1024],
+            "summary": str(raw.get("summary") or "")[:6000],
+            "limitations": [str(value)[:1000] for value in limitations[:8]],
+            "steps": steps,
+        }
+
+    @staticmethod
+    def _validate_references(
+        value: Any,
+        position: int,
+        dependencies: set[int],
+    ) -> None:
+        if isinstance(value, dict):
+            for item in value.values():
+                WorkPlanService._validate_references(item, position, dependencies)
+            return
+        if isinstance(value, list):
+            for item in value:
+                WorkPlanService._validate_references(item, position, dependencies)
+            return
+        if not isinstance(value, str):
+            return
+        for match in REFERENCE_RE.finditer(value):
+            reference = int(match.group(1))
+            if reference >= position or reference not in dependencies:
+                raise ValueError(
+                    f"Step {position} contains a result reference to undeclared dependency step {reference}"
+                )
+
+    def _workspace_context(self, workspace_id: str) -> list[dict[str, Any]]:
+        with self.database.session() as session:
+            files = list(
+                session.scalars(
+                    select(File)
+                    .where(
+                        File.workspace_id == workspace_id,
+                        File.status.notin_({"deleted", "revoked"}),
+                    )
+                    .order_by(File.filename, File.id)
+                    .limit(100)
+                ).all()
+            )
+            return [
+                {
+                    "file_id": item.id,
+                    "filename": item.filename,
+                    "extension": item.extension,
+                    "status": item.status,
+                    "size": item.size,
+                    "sha256": item.sha256,
+                }
+                for item in files
+            ]
+
+    def _task_claim(self, task_id: str) -> dict[str, Any]:
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is None or not task.workspace_id:
+                raise ValueError("Task not found or has no active Workspace")
+            settings = dict(DEFAULTS)
+            for key in ("privacy_mode", "default_model", "reasoning_level"):
+                item = session.get(Setting, key)
+                if item is not None:
+                    settings[key] = item.value_json
+            return {
+                "task_id": task.id,
+                "workspace_id": task.workspace_id,
+                "user_request": task.user_request,
+                "execution_mode": task.execution_mode,
+                "privacy_mode": str(settings["privacy_mode"]),
+                "model": str(settings["default_model"]),
+                "reasoning_effort": str(settings["reasoning_level"]),
+            }
+
+    def _plan_record(self, plan_id: str) -> WorkPlan:
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None:
+                raise ValueError("Work plan not found")
+            session.expunge(plan)
+            return plan
+
+    def _awaiting_gate(self, plan_id: str) -> WorkPlanStep | None:
+        with self.database.session() as session:
+            step = session.scalar(
+                select(WorkPlanStep)
+                .where(
+                    WorkPlanStep.plan_id == plan_id,
+                    WorkPlanStep.status == "awaiting_confirmation",
+                )
+                .order_by(WorkPlanStep.position)
+            )
+            if step is not None:
+                session.expunge(step)
+            return step
+
+    def _proposal_state(self, tool_name: str, entity_id: str) -> str:
+        service = {
+            "propose_source_file_edit": self.source_edit_service,
+            "propose_source_file_edit_batch": self.source_edit_batch_service,
+            "propose_file_organization": self.file_organization_service,
+            "propose_file_organization_batch": self.file_organization_batch_service,
+            "propose_file_recycle": self.file_recycle_service,
+            "propose_file_recycle_batch": self.file_recycle_batch_service,
+        }.get(tool_name)
+        if service is None:
+            raise ValueError("Work-plan proposal gate references an unsupported tool")
+        try:
+            payload = service.get(entity_id)
+        except ValueError as exc:
+            raise ValueError("The gated file proposal no longer exists") from exc
+        return str(payload.get("status") or "unknown")
+
+    @staticmethod
+    def _accepted_proposal_status(tool_name: str) -> str:
+        if tool_name in {
+            "propose_source_file_edit",
+            "propose_source_file_edit_batch",
+            "propose_file_organization",
+            "propose_file_organization_batch",
+        }:
+            return "applied"
+        if tool_name in {"propose_file_recycle", "propose_file_recycle_batch"}:
+            return "recycled"
+        raise ValueError("Unsupported proposal-gate tool")
+
+    def _start_execution(self, plan_id: str, *, event: str) -> str:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None:
+                raise ValueError("Work plan not found")
+            task = session.get(Task, plan.task_id)
+            plan.status = "running"
+            plan.started_at = plan.started_at or now
+            plan.error_message = None
+            if task is not None:
+                task.status = "running"
+                task.started_at = task.started_at or now
+                task.completed_at = None
+                task.error_message = None
+            run = AgentRun(
+                task_id=plan.task_id,
+                model="work-plan-executor",
+                status="running",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    agent_run_id=run.id,
+                    action=event,
+                    target=plan.id,
+                    result="Persistent work-plan execution started",
+                    risk_level=0,
+                )
+            )
+            return run.id
+
+    def _complete(self, plan_id: str, run_id: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None:
+                raise ValueError("Work plan not found")
+            plan.status = "completed"
+            plan.completed_at = now
+            plan.error_message = None
+            task = session.get(Task, plan.task_id)
+            if task is not None:
+                task.status = "completed"
+                task.progress = 1.0
+                task.result_text = f"Work plan completed: {plan.summary}"[:12000]
+                task.error_message = None
+                task.completed_at = now
+            run = session.get(AgentRun, run_id)
+            if run is not None:
+                run.status = "completed"
+                run.completed_at = now
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    agent_run_id=run_id,
+                    action="work_plan_completed",
+                    target=plan_id,
+                    result=plan.summary[:4000],
+                    risk_level=0,
+                )
+            )
+
+    def _fail_step(
+        self,
+        plan_id: str,
+        step_id: str,
+        run_id: str,
+        message: str,
+    ) -> None:
+        message = message[:4000]
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            step = session.get(WorkPlanStep, step_id)
+            if plan is None or step is None:
+                return
+            step.status = "failed"
+            step.error_message = message
+            step.completed_at = now
+            plan.status = "failed"
+            plan.error_message = message
+            task = session.get(Task, plan.task_id)
+            if task is not None:
+                task.status = "failed"
+                task.error_message = message
+                task.completed_at = now
+            run = session.get(AgentRun, run_id)
+            if run is not None:
+                run.status = "failed"
+                run.completed_at = now
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    agent_run_id=run_id,
+                    action="work_plan_step_failed",
+                    target=step_id,
+                    result=message,
+                    risk_level=step.risk_level,
+                )
+            )
+
+    def _fail(self, plan_id: str, run_id: str, message: str) -> None:
+        message = message[:4000]
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            if plan is None:
+                return
+            plan.status = "failed"
+            plan.error_message = message
+            task = session.get(Task, plan.task_id)
+            if task is not None:
+                task.status = "failed"
+                task.error_message = message
+                task.completed_at = now
+            run = session.get(AgentRun, run_id)
+            if run is not None:
+                run.status = "failed"
+                run.completed_at = now
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    agent_run_id=run_id,
+                    action="work_plan_failed",
+                    target=plan_id,
+                    result=message,
+                    risk_level=0,
+                )
+            )
+
+    def _block_after_gate(self, plan_id: str, step_id: str, message: str) -> None:
+        now = datetime.now(timezone.utc)
+        with self.database.session() as session:
+            plan = session.get(WorkPlan, plan_id)
+            step = session.get(WorkPlanStep, step_id)
+            if plan is None or step is None:
+                return
+            step.status = "failed"
+            step.error_message = message[:4000]
+            step.completed_at = now
+            plan.status = "blocked"
+            plan.error_message = message[:4000]
+            task = session.get(Task, plan.task_id)
+            if task is not None:
+                task.status = "blocked"
+                task.error_message = message[:4000]
+                task.completed_at = now
+            session.add(
+                AuditLog(
+                    task_id=plan.task_id,
+                    action="work_plan_gate_blocked",
+                    target=step_id,
+                    result=message[:4000],
+                    risk_level=step.risk_level,
+                )
+            )
+
+    def _planning_failed(self, task_id: str, message: str) -> None:
+        with self.database.session() as session:
+            task = session.get(Task, task_id)
+            if task is not None:
+                task.status = "failed"
+                task.error_message = message[:4000]
+                task.completed_at = datetime.now(timezone.utc)
+            session.add(
+                AuditLog(
+                    task_id=task_id,
+                    action="work_plan_draft_failed",
+                    result=message[:4000],
+                    risk_level=0,
+                )
+            )
+
+    def _finish_run(self, run_id: str, status: str) -> None:
+        with self.database.session() as session:
+            run = session.get(AgentRun, run_id)
+            if run is not None:
+                run.status = status
+                run.completed_at = datetime.now(timezone.utc)
+
+    @staticmethod
+    def _task_progress(session, plan_id: str) -> float:
+        steps = list(
+            session.scalars(
+                select(WorkPlanStep).where(WorkPlanStep.plan_id == plan_id)
+            ).all()
+        )
+        if not steps:
+            return 0.08
+        completed = sum(1 for item in steps if item.status == "completed")
+        return min(0.95, 0.1 + (completed / len(steps)) * 0.85)
+
+    @staticmethod
+    def _payload(session, plan: WorkPlan) -> dict[str, Any]:
+        steps = list(
+            session.scalars(
+                select(WorkPlanStep)
+                .where(WorkPlanStep.plan_id == plan.id)
+                .order_by(WorkPlanStep.position)
+            ).all()
+        )
+        completed = sum(1 for step in steps if step.status == "completed")
+        return {
+            "id": plan.id,
+            "task_id": plan.task_id,
+            "workspace_id": plan.workspace_id,
+            "title": plan.title,
+            "summary": plan.summary,
+            "limitations": list(plan.limitations_json or []),
+            "status": plan.status,
+            "error_message": plan.error_message,
+            "created_at": plan.created_at.isoformat(),
+            "started_at": plan.started_at.isoformat() if plan.started_at else None,
+            "completed_at": plan.completed_at.isoformat() if plan.completed_at else None,
+            "cancelled_at": plan.cancelled_at.isoformat() if plan.cancelled_at else None,
+            "progress": completed / len(steps) if steps else 0.0,
+            "requires_confirmation": plan.status == "awaiting_confirmation",
+            "can_start": plan.status == "ready",
+            "can_resume": plan.status == "awaiting_confirmation",
+            "can_retry": plan.status in {"failed", "paused"},
+            "can_cancel": plan.status not in {"completed", "cancelled"},
+            "steps": [
+                {
+                    "id": step.id,
+                    "position": step.position,
+                    "title": step.title,
+                    "description": step.description,
+                    "tool_name": step.tool_name,
+                    "arguments": step.arguments_json,
+                    "dependencies": list(step.dependencies_json or []),
+                    "risk_level": step.risk_level,
+                    "execution_mode": step.execution_mode,
+                    "status": step.status,
+                    "result_summary": step.result_summary,
+                    "result": step.result_json,
+                    "tool_call_id": step.tool_call_id,
+                    "external_entity_type": step.external_entity_type,
+                    "external_entity_id": step.external_entity_id,
+                    "error_message": step.error_message,
+                    "created_at": step.created_at.isoformat(),
+                    "started_at": step.started_at.isoformat() if step.started_at else None,
+                    "completed_at": step.completed_at.isoformat() if step.completed_at else None,
+                }
+                for step in steps
+            ],
+        }
