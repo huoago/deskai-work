@@ -555,3 +555,21 @@ Security invariants:
 - backup/quarantine copies must be preserved during manual investigation;
 - transactional batches must be investigated as a whole rather than member-by-member;
 - unknown failures degrade to a low-confidence manual-review classification rather than guessing a destructive fix.
+
+
+## Phase 19 — Recovery snapshot and safe recheck
+
+Phase 19 adds an on-demand GET-only recovery snapshot for `recovery_required` records.
+
+Security invariants:
+
+- the transaction id must resolve to one of the six persisted Phase 11–16 transaction families;
+- the persisted transaction status must already be `recovery_required`;
+- callers cannot provide arbitrary filesystem paths;
+- only paths already stored by the transaction or its tracked File record are inspected;
+- symbolic links are reported but never followed or hashed;
+- missing, conflicting or hash-mismatched paths remain non-actionable;
+- snapshots are not stored in SQLite and do not alter AuditLog, transaction status, Workspace File status, backup data, or quarantine data;
+- even a consistent snapshot returns `safe_to_retry_existing_action: false`;
+- Phase 19 cannot clear `recovery_required` and cannot call rollback/restore itself;
+- no overwrite, purge, ignore-SHA, force-repair or single-member batch repair capability is introduced.
