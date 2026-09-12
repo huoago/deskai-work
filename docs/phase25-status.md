@@ -1,6 +1,6 @@
 # Phase 25 — Production Hardening & Release Readiness
 
-Status: in progress on `phase25-release-readiness`.
+Status: complete, verified, and merged to `main`.
 
 ## Objective
 
@@ -46,24 +46,32 @@ The release job:
 - creates a GitHub Release only after all prior verification succeeds;
 - defaults manual releases to prerelease.
 
-## Current version note
+## Version domains
 
 The desktop package version remains `0.1.0`, while the packaged Engine reports `0.24.0`. Phase 25 treats those as separate version domains and records both in release evidence instead of silently forcing them to match.
 
-## Non-goals
+## Final verification
 
-Phase 25 does not add unattended auto-update, code signing secrets, remote execution, network-wide Engine binding, destructive filesystem authority, or automatic production publication.
+- Feature PR: #45 — Phase 25 — Production Hardening & Release Readiness.
+- Feature head: `514c3183873724ec432dadad100d1e073ac9af82`.
+- Feature merge SHA: `0fefe99e20e5c2ed68dfcb246156aeb27bad83fc`.
+- CI: Run #136, workflow run ID `34705461718`, completed with `success`.
+- Engine CI: success.
+- Desktop web CI: success.
+- Windows native CI: success.
+- Packaged Engine smoke: `0.24.0`.
+- Windows installers produced:
+  - `DeskAI Work_0.1.0_x64-setup.exe`
+  - `DeskAI Work_0.1.0_x64_en-US.msi`
+- Installer checksum generation: success; `SHA256SUMS.txt` included in the uploaded artifact.
+- Windows artifact: `DeskAI-Work-Windows`.
+- Artifact ID: `10301840818`.
+- Artifact size: `394625430` bytes.
+- Artifact ZIP SHA-256: `2b19cba25af1bc3739dce7534e96dd6704d4d200efb1c225e074be0e68fe2e7e`.
+- Artifact created: `2026-09-12T16:45:57Z`.
+- Artifact retention expiry: `2026-10-12T16:45:44Z`.
+- Upload evidence confirms exactly three files were included: NSIS installer, MSI installer, and `SHA256SUMS.txt`.
+- Normal CI used least-privilege GitHub token permissions: contents read, metadata read.
+- No unattended auto-update, signing secrets, remote execution, broad network binding, destructive filesystem authority, or automatic release-on-push behavior was added.
 
-## Verification target
-
-- Ruff
-- full Engine pytest suite
-- TypeScript typecheck
-- Vite production build
-- packaged Engine smoke
-- Windows NSIS/MSI build
-- checksum generation
-- CI artifact upload
-- release workflow syntax/review
-
-Final CI run IDs, artifact IDs, hashes, PR merge SHA, and final `main` SHA will be recorded during closeout.
+Phase 25 is fully merged to `main`; this closeout records the final release-readiness evidence.
