@@ -64,15 +64,15 @@ def export_recovery_evidence(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    if item.get("status") not in VISIBLE_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail="Recovery evidence export is limited to transactions visible in Recovery Center",
-        )
     if scope == "single" and item.get("batch_id"):
         raise HTTPException(
             status_code=409,
             detail="Batch members must be exported through the parent recovery transaction",
+        )
+    if item.get("status") not in VISIBLE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Recovery evidence export is limited to transactions visible in Recovery Center",
         )
 
     entry = _entry(entity_type, scope, item, count_key)
