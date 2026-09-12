@@ -95,6 +95,28 @@ class ArtifactService:
             mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def create_recovery_evidence_package(
+        self,
+        *,
+        task_id: str,
+        workspace_id: str,
+        filename: str,
+        content: bytes,
+    ) -> GeneratedArtifact:
+        if not content:
+            raise ValueError("Recovery evidence package cannot be empty")
+        if len(content) > 10 * 1024 * 1024:
+            raise ValueError("Recovery evidence package exceeds the 10 MiB metadata limit")
+        target = self._target(task_id, filename, ".zip")
+        target.write_bytes(content)
+        return self._record(
+            task_id=task_id,
+            workspace_id=workspace_id,
+            kind="recovery_evidence",
+            target=target,
+            mime_type="application/zip",
+        )
+
     def _target(self, task_id: str, requested: str, suffix: str) -> Path:
         safe_task = re.sub(r"[^A-Za-z0-9-]", "", task_id)
         if not safe_task:
