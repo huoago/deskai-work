@@ -2642,25 +2642,75 @@ function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, req
   );
 }
 
-function WorkPlanPanel({ plan, disabled, onStart, onResume, onRetry, onCancel }: {
+function WorkPlanPanel({
+  plan,
+  disabled,
+  onStart,
+  onResume,
+  onRetry,
+  onCancel,
+  onPause,
+  onContinue,
+  onApproveStep,
+  onSkipStep,
+  onConfigure,
+  onAcknowledgeEvent,
+}: {
   plan: WorkPlanRecord;
   disabled: boolean;
   onStart: (plan: WorkPlanRecord) => void;
   onResume: (plan: WorkPlanRecord) => void;
   onRetry: (plan: WorkPlanRecord) => void;
   onCancel: (plan: WorkPlanRecord) => void;
+  onPause: (plan: WorkPlanRecord) => void;
+  onContinue: (plan: WorkPlanRecord) => void;
+  onApproveStep: (plan: WorkPlanRecord, step: WorkPlanStepRecord) => void;
+  onSkipStep: (plan: WorkPlanRecord, step: WorkPlanStepRecord) => void;
+  onConfigure: (plan: WorkPlanRecord) => void;
+  onAcknowledgeEvent: (plan: WorkPlanRecord, event: WorkPlanEventRecord) => void;
 }) {
+  const eta = plan.estimate.estimated_remaining_seconds;
+  const runtimeUsed = Math.round(plan.supervision.runtime_seconds_used * 10) / 10;
+  const runtimeRemaining = Math.max(0, Math.round(plan.supervision.runtime_seconds_remaining * 10) / 10);
   return (
     <div className="source-edit-section batch-transaction-section work-plan-section">
       <div className="artifact-section-head">
         <div>
-          <span className="eyebrow">Phase 22 · 持久化工作计划</span>
+          <span className="eyebrow">Phase 24 · Work Plan Supervision</span>
           <strong>{plan.title}</strong>
         </div>
         <span className={`task-status ${plan.status}`}>{workPlanStatusLabel(plan.status)}</span>
       </div>
       <p>{plan.summary}</p>
-      <div className="task-progress-track"><span style={{ width: `${Math.round(plan.progress * 100)}%` }} /></div>
+      <div className="task-progress-track">
+        <span style={{ width: `${Math.round(plan.progress * 100)}%` }} />
+      </div>
+
+      <div className="mini-summary">
+        已完成 {plan.estimate.completed_steps} · 已跳过 {plan.estimate.skipped_steps} · 剩余 {plan.estimate.remaining_steps}
+        {eta !== null ? ` · 预计剩余约 ${formatDurationSeconds(eta)}` : " · ETA 待积累步骤耗时后估算"}
+        {plan.unread_notifications > 0 ? ` · 未读通知 ${plan.unread_notifications}` : ""}
+      </div>
+
+      <div className="recovery-guidance-grid">
+        <div>
+          <strong>执行预算</strong>
+          <ul>
+            <li>工具步骤：{plan.supervision.auto_steps_used}/{plan.supervision.max_auto_steps}，剩余 {plan.supervision.auto_steps_remaining}</li>
+            <li>累计运行：{runtimeUsed}s / {plan.supervision.runtime_budget_seconds}s，剩余 {runtimeRemaining}s</li>
+            <li>单步骤软超时：{plan.supervision.step_timeout_seconds}s</li>
+          </ul>
+        </div>
+        <div>
+          <strong>人工监督</strong>
+          <ul>
+            <li>失败策略：{plan.supervision.failure_policy === "pause" ? "失败后暂停" : "失败后终止"}</li>
+            <li>审批阈值：{plan.supervision.approval_risk_threshold >= 4 ? "关闭额外审批" : `L${plan.supervision.approval_risk_threshold} 及以上自动步骤`}</li>
+            <li>暂停方式：步骤边界暂停；运行中的工具不强杀</li>
+          </ul>
+        </div>
+      </div>
+
       {plan.limitations.length > 0 && (
         <div className="recovery-guidance-grid">
           <div>
@@ -2669,22 +2719,38 @@ function WorkPlanPanel({ plan, disabled, onStart, onResume, onRetry, onCancel }:
           </div>
         </div>
       )}
-      {plan.error_message && <div className="provider-error">{plan.error_message}</div>}
+
+      {plan.pause_reason && <div className="provider-warning">暂停原因：{plan.pause_reason}</div>}
+      {plan.error_message && !plan.pause_reason && <div className="provider-error">{plan.error_message}</div>}
+      {plan.requires_step_approval && (
+        <div className="provider-warning">
+          计划正在等待某个自动步骤的人工审批。批准只允许该已注册工具进入后台队列；不会绕过 ToolRegistry、PermissionGate 或任何文件确认门禁。
+        </div>
+      )}
+
       <div className="source-edit-list">
         {plan.steps.map((step) => (
           <article className="source-edit-card work-plan-step-card" key={step.id}>
             <div className="source-edit-head">
               <div>
                 <strong>{step.position}. {step.title}</strong>
-                <span>{step.tool_name} · 风险 L{step.risk_level} · {step.execution_mode === "proposal_gate" ? "人工确认门禁" : "自动步骤"}</span>
+                <span>
+                  {step.tool_name} · 风险 L{step.risk_level} · {step.execution_mode === "proposal_gate" ? "原文件事务确认门禁" : "受监督自动步骤"}
+                </span>
               </div>
               <span className={`task-status ${step.status}`}>{workPlanStepStatusLabel(step.status)}</span>
             </div>
             <p>{step.description}</p>
             <div className="source-edit-hash">
               <small>依赖：{step.dependencies.length ? step.dependencies.map((value) => `#${value}`).join(" / ") : "无"}</small>
+              {step.duration_seconds !== null && <small>耗时 {step.duration_seconds.toFixed(2)}s</small>}
               {step.tool_call_id && <small>ToolCall {step.tool_call_id.slice(0, 8)}…</small>}
             </div>
+            {step.timeout_exceeded && (
+              <div className="provider-warning">该步骤超过监督超时阈值；DeskAI 没有强杀工具，工具安全返回后计划已停止继续推进。</div>
+            )}
+            {step.approved_at && <p className="muted small">人工审批：{formatDate(step.approved_at)}</p>}
+            {step.skip_reason && <p className="provider-warning">人工跳过：{step.skip_reason}</p>}
             <details className="recovery-evidence">
               <summary>查看计划参数</summary>
               <pre className="edit-diff-preview">{JSON.stringify(step.arguments, null, 2)}</pre>
@@ -2701,19 +2767,66 @@ function WorkPlanPanel({ plan, disabled, onStart, onResume, onRetry, onCancel }:
                 已生成原有安全文件提案 {step.external_entity_type} / {step.external_entity_id?.slice(0, 8)}…。请在本任务下方对应提案卡片完成原人工确认；确认成功后再点击“继续计划”。
               </div>
             )}
+            <div className="button-row">
+              {step.status === "awaiting_step_approval" && (
+                <button className="primary" disabled={disabled} onClick={() => onApproveStep(plan, step)}>
+                  批准此步骤
+                </button>
+              )}
+              {step.execution_mode === "auto" && ["pending", "awaiting_step_approval"].includes(step.status) && (
+                <button className="secondary" disabled={disabled} onClick={() => onSkipStep(plan, step)}>
+                  跳过此步骤
+                </button>
+              )}
+            </div>
           </article>
         ))}
       </div>
+
       <div className="button-row">
-        {plan.can_start && <button className="primary" disabled={disabled} onClick={() => onStart(plan)}>开始执行计划</button>}
-        {plan.can_resume && <button className="primary" disabled={disabled} onClick={() => onResume(plan)}>继续计划</button>}
-        {plan.can_retry && <button className="secondary" disabled={disabled} onClick={() => onRetry(plan)}>重试中断/失败步骤</button>}
+        {plan.can_start && <button className="primary" disabled={disabled} onClick={() => onStart(plan)}>开始后台执行</button>}
+        {plan.can_resume && <button className="primary" disabled={disabled} onClick={() => onResume(plan)}>确认文件动作后继续</button>}
+        {plan.can_pause && <button className="secondary" disabled={disabled} onClick={() => onPause(plan)}>暂停计划</button>}
+        {plan.can_continue && <button className="primary" disabled={disabled} onClick={() => onContinue(plan)}>继续计划</button>}
+        {plan.can_retry && <button className="secondary" disabled={disabled} onClick={() => onRetry(plan)}>重试失败/中断步骤</button>}
         {plan.can_cancel && <button className="secondary" disabled={disabled} onClick={() => onCancel(plan)}>取消计划</button>}
+        {!["completed", "cancelled"].includes(plan.status) && (
+          <button className="secondary" disabled={disabled} onClick={() => onConfigure(plan)}>调整监督参数</button>
+        )}
       </div>
-      <p className="artifact-policy-note">计划执行仍通过原 ToolRegistry、PermissionGate 与 AuditLog。propose_* 步骤只创建既有文件事务提案；计划自身没有确认、覆盖、删除、回滚或恢复文件的特殊权限。</p>
+
+      <details className="recovery-evidence" open={plan.unread_notifications > 0}>
+        <summary>执行时间线与计划通知（最近 {plan.latest_events.length} 条）</summary>
+        <div className="source-edit-list">
+          {plan.latest_events.map((event) => (
+            <article className="source-edit-card" key={event.id}>
+              <div className="source-edit-head">
+                <div>
+                  <strong>{event.message}</strong>
+                  <span>{event.event_type} · {formatDate(event.created_at)}</span>
+                </div>
+                <span>{event.severity}</span>
+              </div>
+              {event.acknowledged_at ? (
+                <p className="muted small">已确认 {formatDate(event.acknowledged_at)}</p>
+              ) : ["warning", "action"].includes(event.severity) ? (
+                <button className="text-button" disabled={disabled} onClick={() => onAcknowledgeEvent(plan, event)}>
+                  标记已读
+                </button>
+              ) : null}
+            </article>
+          ))}
+          {!plan.latest_events.length && <p className="muted small">尚无监督时间线事件。</p>}
+        </div>
+      </details>
+
+      <p className="artifact-policy-note">
+        Phase 24 只增加监督与人工控制，不增加文件权限。Pause/Timeout 都不强杀正在运行的工具；Skip 不能用于文件提案门禁或仍被后续步骤依赖的步骤；原 Phase 11–16 文件确认仍是唯一写入门禁。
+      </p>
     </div>
   );
 }
+
 function RecoveryPage({
   entries,
   disabled,
