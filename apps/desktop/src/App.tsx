@@ -2427,6 +2427,78 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   );
 }
 
+function WorkPlanPanel({ plan, disabled, onStart, onResume, onRetry, onCancel }: {
+  plan: WorkPlanRecord;
+  disabled: boolean;
+  onStart: (plan: WorkPlanRecord) => void;
+  onResume: (plan: WorkPlanRecord) => void;
+  onRetry: (plan: WorkPlanRecord) => void;
+  onCancel: (plan: WorkPlanRecord) => void;
+}) {
+  return (
+    <div className="source-edit-section batch-transaction-section work-plan-section">
+      <div className="artifact-section-head">
+        <div>
+          <span className="eyebrow">Phase 22 · 持久化工作计划</span>
+          <strong>{plan.title}</strong>
+        </div>
+        <span className={`task-status ${plan.status}`}>{workPlanStatusLabel(plan.status)}</span>
+      </div>
+      <p>{plan.summary}</p>
+      <div className="task-progress-track"><span style={{ width: `${Math.round(plan.progress * 100)}%` }} /></div>
+      {plan.limitations.length > 0 && (
+        <div className="recovery-guidance-grid">
+          <div>
+            <strong>计划边界</strong>
+            <ul>{plan.limitations.map((item, index) => <li key={`${plan.id}:limit:${index}`}>{item}</li>)}</ul>
+          </div>
+        </div>
+      )}
+      {plan.error_message && <div className="provider-error">{plan.error_message}</div>}
+      <div className="source-edit-list">
+        {plan.steps.map((step) => (
+          <article className="source-edit-card work-plan-step-card" key={step.id}>
+            <div className="source-edit-head">
+              <div>
+                <strong>{step.position}. {step.title}</strong>
+                <span>{step.tool_name} · 风险 L{step.risk_level} · {step.execution_mode === "proposal_gate" ? "人工确认门禁" : "自动步骤"}</span>
+              </div>
+              <span className={`task-status ${step.status}`}>{workPlanStepStatusLabel(step.status)}</span>
+            </div>
+            <p>{step.description}</p>
+            <div className="source-edit-hash">
+              <small>依赖：{step.dependencies.length ? step.dependencies.map((value) => `#${value}`).join(" / ") : "无"}</small>
+              {step.tool_call_id && <small>ToolCall {step.tool_call_id.slice(0, 8)}…</small>}
+            </div>
+            <details className="recovery-evidence">
+              <summary>查看计划参数</summary>
+              <pre className="edit-diff-preview">{JSON.stringify(step.arguments, null, 2)}</pre>
+            </details>
+            {step.result_summary && (
+              <details className="recovery-evidence">
+                <summary>查看步骤结果</summary>
+                <pre className="edit-diff-preview">{step.result_summary}</pre>
+              </details>
+            )}
+            {step.error_message && <div className="provider-error">{step.error_message}</div>}
+            {step.status === "awaiting_confirmation" && (
+              <div className="provider-warning">
+                已生成原有安全文件提案 {step.external_entity_type} / {step.external_entity_id?.slice(0, 8)}…。请在本任务下方对应提案卡片完成原人工确认；确认成功后再点击“继续计划”。
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+      <div className="button-row">
+        {plan.can_start && <button className="primary" disabled={disabled} onClick={() => onStart(plan)}>开始执行计划</button>}
+        {plan.can_resume && <button className="primary" disabled={disabled} onClick={() => onResume(plan)}>继续计划</button>}
+        {plan.can_retry && <button className="secondary" disabled={disabled} onClick={() => onRetry(plan)}>重试中断/失败步骤</button>}
+        {plan.can_cancel && <button className="secondary" disabled={disabled} onClick={() => onCancel(plan)}>取消计划</button>}
+      </div>
+      <p className="artifact-policy-note">计划执行仍通过原 ToolRegistry、PermissionGate 与 AuditLog。propose_* 步骤只创建既有文件事务提案；计划自身没有确认、覆盖、删除、回滚或恢复文件的特殊权限。</p>
+    </div>
+  );
+}
 function RecoveryPage({
   entries,
   disabled,
