@@ -191,18 +191,23 @@ class KnowledgeIndexer:
             return True
 
     def rebuild_embeddings(self, workspace_id: str | None = None, file_limit: int = 20) -> dict[str, object]:
-        """Backfill the currently selected vector provider from authoritative active chunks.
+        """Backfill the selected vector provider from authoritative active chunks.
 
-        This does not reparse files or change FTS/current-version state. It is safe to
-        run incrementally after switching embedding providers.
+        The database snapshot is converted to primitive values before the session
+        closes, so a slow/cloud embedding call never retains detached ORM objects.
+        The operation does not reparse files or change FTS/current-version state.
         """
         descriptor = self.embedding_service.descriptor()
+        payloads: list[tuple[str, str, list[dict[str, str]]]] = []
         with self.database.session() as session:
             file_query = select(File).where(File.status == "indexed")
             if workspace_id:
                 file_query = file_query.where(File.workspace_id == workspace_id)
-            files = list(session.scalars(file_query.order_by(File.updated_at, File.id).limit(file_limit)).all())
-            payloads: list[tuple[str, str, list[tuple[Chunk, str]]]] = []
+            files = list(
+                session.scalars(
+                    file_query.order_by(File.updated_at, File.id).limit(file_limit)
+                ).all()
+            )
             for file in files:
                 chunks = list(
                     session.scalars(
@@ -215,29 +220,45 @@ class KnowledgeIndexer:
                         .order_by(Chunk.chunk_index)
                     ).all()
                 )
-                payloads.append((file.id, file.filename, [(chunk, chunk.content) for chunk in chunks]))
+                chunk_payload = [
+                    {
+                        "chunk_id": chunk.id,
+                        "workspace_id": chunk.workspace_id,
+                        "file_id": chunk.file_id,
+                        "file_version_id": chunk.file_version_id,
+                        "content": chunk.content,
+                    }
+                    for chunk in chunks
+                ]
+                payloads.append((file.id, file.filename, chunk_payload))
 
         rebuilt = 0
         chunks_written = 0
         for file_id, filename, chunk_payload in payloads:
             if not chunk_payload:
                 continue
-            vectors = self.embedding_service.embed_documents([content for _, content in chunk_payload])
+            vectors = self.embedding_service.embed_documents(
+                [item["content"] for item in chunk_payload]
+            )
             rows = []
-            for (chunk, content), vector in zip(chunk_payload, vectors, strict=True):
+            for item, vector in zip(chunk_payload, vectors, strict=True):
                 rows.append(
                     {
-                        "chunk_id": chunk.id,
-                        "workspace_id": chunk.workspace_id,
-                        "file_id": chunk.file_id,
-                        "file_version_id": chunk.file_version_id,
+                        "chunk_id": item["chunk_id"],
+                        "workspace_id": item["workspace_id"],
+                        "file_id": item["file_id"],
+                        "file_version_id": item["file_version_id"],
                         "filename": filename,
-                        "content": content,
+                        "content": item["content"],
                         "embedding_provider": descriptor.signature,
                         "vector": vector,
                     }
                 )
-            self.vector_store.replace_file(file_id, rows, provider_signature=descriptor.signature)
+            self.vector_store.replace_file(
+                file_id,
+                rows,
+                provider_signature=descriptor.signature,
+            )
             rebuilt += 1
             chunks_written += len(rows)
         return {
