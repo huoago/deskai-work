@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 router = APIRouter(tags=["recovery"])
 
@@ -345,3 +345,21 @@ def list_recovery_entries(
         reverse=True,
     )
     return candidates[:limit]
+
+
+
+@router.get("/recovery/{entity_type}/{transaction_id}/snapshot")
+def get_recovery_snapshot(
+    entity_type: str,
+    transaction_id: str,
+    request: Request,
+) -> dict[str, Any]:
+    try:
+        return request.app.state.recovery_snapshot_service.capture(
+            entity_type,
+            transaction_id,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 409
+        raise HTTPException(status_code=status_code, detail=message) from exc

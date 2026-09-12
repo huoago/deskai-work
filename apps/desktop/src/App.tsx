@@ -22,6 +22,7 @@ import {
   getOpenAIProviderStatus,
   getParsedPreview,
   getParserStatus,
+  getRecoverySnapshot,
   getTask,
   getWorkspaceWatcherStatus,
   listActivity,
@@ -76,6 +77,7 @@ import {
   type ParsedPreview,
   type ParserStatus,
   type RecoveryEntry,
+  type RecoverySnapshot,
   type SearchHit,
   type TaskDetail,
   type TaskRecord,
@@ -981,6 +983,12 @@ export default function App() {
     }
   }
 
+  async function onCaptureRecoverySnapshot(
+    entry: RecoveryEntry,
+  ): Promise<RecoverySnapshot> {
+    return getRecoverySnapshot(entry.entity_type, entry.id);
+  }
+
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1209,6 +1217,7 @@ export default function App() {
             entries={recoveryEntries}
             disabled={!online || busy}
             onRecover={onRecoverEntry}
+            onSnapshot={onCaptureRecoverySnapshot}
             onOpenTask={(taskId) => {
               setPage("tasks");
               void onSelectTask(taskId);
@@ -1289,7 +1298,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 18 · AI + 文件事务 + 恢复诊断</span>
+          <span className="phase-chip">Phase 19 · AI + 文件事务 + 恢复快照</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -2233,14 +2242,36 @@ function RecoveryPage({
   entries,
   disabled,
   onRecover,
+  onSnapshot,
   onOpenTask,
 }: {
   entries: RecoveryEntry[];
   disabled: boolean;
   onRecover: (entry: RecoveryEntry) => void;
+  onSnapshot: (entry: RecoveryEntry) => Promise<RecoverySnapshot>;
   onOpenTask: (taskId: string) => void;
 }) {
   const [filter, setFilter] = useState<"recoverable" | "attention" | "history" | "all">("recoverable");
+  const [snapshots, setSnapshots] = useState<Record<string, RecoverySnapshot>>({});
+  const [snapshotErrors, setSnapshotErrors] = useState<Record<string, string>>({});
+  const [snapshotLoading, setSnapshotLoading] = useState<string | null>(null);
+
+  async function refreshSnapshot(entry: RecoveryEntry) {
+    const key = recoverySnapshotKey(entry);
+    setSnapshotLoading(key);
+    setSnapshotErrors((current) => ({ ...current, [key]: "" }));
+    try {
+      const snapshot = await onSnapshot(entry);
+      setSnapshots((current) => ({ ...current, [key]: snapshot }));
+    } catch (error) {
+      setSnapshotErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "恢复快照检测失败",
+      }));
+    } finally {
+      setSnapshotLoading((current) => (current === key ? null : current));
+    }
+  }
   const recoverable = entries.filter((item) => item.action !== null);
   const attention = entries.filter((item) => item.recovery_required);
   const history = entries.filter((item) => item.action === null && !item.recovery_required);
@@ -2266,7 +2297,7 @@ function RecoveryPage({
         <div className="panel-head recovery-head">
           <div>
             <h3>统一恢复中心</h3>
-            <p className="muted small">集中查看 Phase 11–17 的已应用编辑、路径事务和回收事务。Phase 18 会对 recovery_required 给出只读诊断与人工核对步骤；恢复按钮仍调用原事务 API，不会绕过 SHA、no-overwrite、备份或隔离副本校验。</p>
+            <p className="muted small">集中查看 Phase 11–18 的文件事务。Phase 19 可按需生成 recovery_required 的只读磁盘快照，重新核对当前路径、SHA-256、备份/隔离副本和批次一致性；快照不会写数据库，也不会解除恢复冻结。</p>
           </div>
           <div className="recovery-filters">
             {([
@@ -2358,8 +2389,24 @@ function RecoveryPage({
                       <p className="muted small">自动修复：关闭。Phase 18 只提供诊断和引导，不会创建 force overwrite、ignore SHA 或直接修改磁盘的新接口。</p>
                     </div>
                   )}
+                  <div className="recovery-snapshot-actions">
+                    <button
+                      className="secondary"
+                      disabled={disabled || snapshotLoading === recoverySnapshotKey(entry)}
+                      onClick={() => void refreshSnapshot(entry)}
+                    >
+                      {snapshotLoading === recoverySnapshotKey(entry) ? "检测中…" : "重新检测磁盘状态"}
+                    </button>
+                    <span className="muted small">只读检测：不会改文件、不会写事务状态、不会解除 recovery_required。</span>
+                  </div>
+                  {snapshotErrors[recoverySnapshotKey(entry)] && (
+                    <div className="provider-error">{snapshotErrors[recoverySnapshotKey(entry)]}</div>
+                  )}
+                  {snapshots[recoverySnapshotKey(entry)] && (
+                    <RecoverySnapshotPanel snapshot={snapshots[recoverySnapshotKey(entry)]} />
+                  )}
                   <div className="recovery-attention-row">
-                    <span className="muted small">自动恢复已停止。请按上面的诊断顺序核对磁盘实际状态，并结合原 Task 与审计记录处理。</span>
+                    <span className="muted small">自动恢复仍处于冻结状态。即使快照检测到一致磁盘态，也必须先完成受控的事务状态核对，Phase 19 不会自行重试原恢复动作。</span>
                     {entry.task_id && <button className="secondary" onClick={() => onOpenTask(entry.task_id!)}>查看对应 Task</button>}
                   </div>
                 </>
@@ -2379,6 +2426,127 @@ function RecoveryPage({
       </article>
     </section>
   );
+}
+
+function recoverySnapshotKey(entry: RecoveryEntry) {
+  return `${entry.entity_type}:${entry.id}`;
+}
+
+function RecoverySnapshotPanel({ snapshot }: { snapshot: RecoverySnapshot }) {
+  const assessment = snapshot.assessment;
+  return (
+    <div className="recovery-snapshot">
+      <div className="recovery-snapshot-head">
+        <div>
+          <span className="eyebrow">Phase 19 · 只读恢复快照</span>
+          <strong>{recoverySnapshotStateLabel(assessment.state)}</strong>
+          <span className="muted small">采集时间 {formatDate(snapshot.captured_at)}</span>
+        </div>
+        <div className="recovery-diagnostic-badges">
+          <span className={`task-status ${assessment.safe_state_detected ? "completed" : "failed"}`}>
+            {assessment.safe_state_detected ? "检测到一致安全态" : "状态仍不一致"}
+          </span>
+          <span className="risk-badge">持久状态仍冻结</span>
+        </div>
+      </div>
+
+      <p>{assessment.reason}</p>
+      <div className="recovery-snapshot-summary">
+        <span>技术恢复前置条件：<b>{assessment.technical_action_preconditions_satisfied ? "已满足" : "未满足/无需动作"}</b></span>
+        <span>允许直接重试：<b>{assessment.safe_to_retry_existing_action ? "是" : "否"}</b></span>
+        <span>状态核对后可能动作：<b>{assessment.action_after_reconciliation === "rollback" ? "回滚" : assessment.action_after_reconciliation === "restore" ? "恢复" : "无"}</b></span>
+      </div>
+
+      <div className="recovery-snapshot-members">
+        {snapshot.members.map((member) => (
+          <article className="recovery-snapshot-member" key={member.id}>
+            <div className="recovery-snapshot-member-head">
+              <strong>{member.filename}</strong>
+              <span className={`task-status ${member.supporting_evidence_valid ? "completed" : "failed"}`}>
+                {recoveryMemberStateLabel(member.state)}
+              </span>
+            </div>
+            {member.tracked_path && <code className="recovery-path">{member.tracked_path}</code>}
+            <div className="recovery-observation-list">
+              {member.observations.map((observation) => (
+                <div className="recovery-observation" key={`${member.id}:${observation.role}`}>
+                  <div>
+                    <strong>{recoveryObservationRoleLabel(observation.role)}</strong>
+                    <span>{observation.is_symlink ? "符号链接（未跟随）" : observation.exists ? observation.is_file ? "文件存在" : "路径存在但不是普通文件" : "不存在"}</span>
+                  </div>
+                  {observation.path && <code>{observation.path}</code>}
+                  <div className="source-edit-hash">
+                    <small>{observation.size === null ? "大小未知" : formatBytes(observation.size)}</small>
+                    <small>{observation.sha256 ? `SHA-256 ${observation.sha256.slice(0, 20)}…` : "未计算 SHA-256"}</small>
+                  </div>
+                  {observation.matches.length > 0 && (
+                    <span className="muted small">匹配事务证据：{observation.matches.join(" / ")}</span>
+                  )}
+                  {observation.error && <span className="provider-error">{observation.error}</span>}
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <details className="recovery-snapshot-audit">
+        <summary>查看相关审计时间线（{snapshot.audit_timeline.length}）</summary>
+        <div className="recovery-snapshot-audit-list">
+          {snapshot.audit_timeline.map((event, index) => (
+            <div key={`${event.timestamp}:${event.action}:${index}`}>
+              <span>{formatDate(event.timestamp)}</span>
+              <strong>{event.action}</strong>
+              <span>风险 L{event.risk_level}</span>
+              {event.result && <small>{event.result}</small>}
+            </div>
+          ))}
+          {!snapshot.audit_timeline.length && <span className="muted small">没有找到相关审计事件。</span>}
+        </div>
+      </details>
+
+      <p className="muted small">该快照是当前时点的只读观测结果，不写入数据库、不改变 recovery_required，也不构成自动恢复授权。</p>
+    </div>
+  );
+}
+
+function recoverySnapshotStateLabel(state: string) {
+  const labels: Record<string, string> = {
+    consistent_original: "磁盘一致：原始态",
+    consistent_applied: "磁盘一致：已应用态",
+    consistent_recycled: "磁盘一致：已回收态",
+    consistent_restored: "磁盘一致：已恢复态",
+    mixed_transaction: "批次成员状态混合",
+    ambiguous: "磁盘状态仍存在歧义",
+  };
+  return labels[state] ?? state;
+}
+
+function recoveryMemberStateLabel(state: string) {
+  const labels: Record<string, string> = {
+    original: "原始态",
+    applied: "已应用态",
+    recycled: "已回收态",
+    restored: "已恢复态",
+    conflict: "双路径冲突",
+    missing: "文件缺失",
+    unknown: "无法识别",
+    original_without_quarantine: "原件存在但隔离副本缺失",
+  };
+  return labels[state] ?? state;
+}
+
+function recoveryObservationRoleLabel(role: string) {
+  const labels: Record<string, string> = {
+    workspace_source: "Workspace 当前源文件",
+    staged_candidate: "暂存候选副本",
+    automatic_backup: "自动备份",
+    original_path: "原路径",
+    target_path: "目标路径",
+    workspace_original: "Workspace 原路径",
+    quarantine_copy: "私有隔离副本",
+  };
+  return labels[role] ?? role;
 }
 
 function recoveryKindLabel(kind: string) {
@@ -2653,7 +2821,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 17</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 19</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -2680,6 +2848,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 17 恢复中心只聚合既有事务记录，不新增文件写入、删除或绕过确认的能力</p>
           <p><b>✓</b> Phase 18 对 recovery_required 仅提供基于持久化事务证据的诊断、核对顺序与禁止操作，不执行自动修复</p>
           <p><b>✓</b> recovery_required 不提供强制覆盖、忽略 SHA、删除备份/隔离副本或拆分批次的“修复”按钮</p>
+          <p><b>✓</b> Phase 19 恢复快照只在人工点击时读取事务已知路径；符号链接不会跟随，检测结果不写数据库、不解除冻结</p>
         </div>
       </article>
     </section>
