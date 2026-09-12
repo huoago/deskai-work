@@ -3152,11 +3152,42 @@ function sourceEditStatusLabel(status: string) {
 
 function taskStatusLabel(status: string) {
   const labels: Record<string, string> = {
+    planning: "计划生成中",
+    planned: "待开始计划",
     pending: "待执行",
     running: "执行中",
+    awaiting_confirmation: "等待人工确认",
     completed: "已完成",
     failed: "失败",
     blocked: "已阻断",
+    cancelled: "已取消",
+  };
+  return labels[status] ?? status;
+}
+
+function workPlanStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    ready: "待开始",
+    running: "执行中",
+    awaiting_confirmation: "等待人工确认",
+    completed: "已完成",
+    failed: "失败",
+    blocked: "已阻断",
+    paused: "中断待重试",
+    cancelled: "已取消",
+  };
+  return labels[status] ?? status;
+}
+
+function workPlanStepStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "待执行",
+    running: "执行中",
+    awaiting_confirmation: "等待人工确认",
+    completed: "已完成",
+    failed: "失败",
+    interrupted: "中断",
+    cancelled: "已取消",
   };
   return labels[status] ?? status;
 }
@@ -3169,6 +3200,19 @@ function activityLabel(action: string) {
     agent_blocked: "Agent 被策略阻断",
     agent_interrupted: "Agent 异常中断",
     worker_failed: "Worker 失败",
+    work_plan_drafted: "工作计划已生成",
+    work_plan_started: "工作计划开始",
+    work_plan_resumed: "工作计划继续",
+    work_plan_retried: "工作计划重试",
+    work_plan_step_completed: "计划步骤完成",
+    work_plan_step_failed: "计划步骤失败",
+    work_plan_waiting_confirmation: "计划等待人工确认",
+    work_plan_confirmation_observed: "计划已识别人工确认",
+    work_plan_gate_blocked: "计划确认门禁阻断",
+    work_plan_completed: "工作计划完成",
+    work_plan_failed: "工作计划失败",
+    work_plan_cancelled: "工作计划取消",
+    work_plan_interrupted: "工作计划中断",
     tool_completed: "工具调用完成",
     tool_failed: "工具调用失败",
     tool_denied: "工具调用被拒绝",
@@ -3292,7 +3336,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 21</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 22</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -3324,6 +3368,9 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 20 解冻只修正事务/File 元数据，绝不修改用户文件；文件动作仍只能走原 rollback/restore 安全 API</p>
           <p><b>✓</b> Phase 21 证据包只写入 DeskAI generated 沙箱，包含元数据/诊断/快照/SHA/审计，不嵌入 Workspace、备份或隔离副本文件内容</p>
           <p><b>✓</b> Phase 21 不改变 recovery/reconciliation 状态，不执行 rollback/restore，不提供 Agent 导出或任意输出路径</p>
+          <p><b>✓</b> Phase 22 多步骤计划的工具风险由本地 PermissionGate 重新计算，模型不能降低风险等级或发明未注册工具</p>
+          <p><b>✓</b> Phase 22 现有文件动作只能运行 propose_* 提案工具，并在原人工确认门禁处暂停；Resume 只在原事务状态证明 applied/recycled 后继续</p>
+          <p><b>✓</b> Engine 中断不会自动重放正在执行的计划步骤；计划冻结为 paused/interrupted，必须人工 Retry</p>
         </div>
       </article>
     </section>
