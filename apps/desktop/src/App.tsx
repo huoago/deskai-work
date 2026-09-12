@@ -2141,7 +2141,7 @@ function TasksPage({ workspace, tasks, status, workPlanWorkerStatus, detail, req
   onAcknowledgeWorkPlanEvent: (plan: WorkPlanRecord, event: WorkPlanEventRecord) => void;
 }) {
   const pending = tasks.filter((item) => ["pending", "planning", "planned", "queued"].includes(item.status)).length;
-  const running = tasks.filter((item) => ["running", "cancelling"].includes(item.status)).length;
+  const running = tasks.filter((item) => ["running", "pausing", "cancelling"].includes(item.status)).length;
   const waitingConfirmation = tasks.filter((item) => ["awaiting_confirmation", "awaiting_step_approval"].includes(item.status)).length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
