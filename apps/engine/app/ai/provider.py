@@ -141,6 +141,112 @@ Use scope=global only for durable cross-project preferences/constraints/workflow
         except (OpenAIError, json.JSONDecodeError, TypeError, ValueError) as exc:
             raise ProviderError(f"Memory extraction failed: {exc}") from exc
 
+    async def draft_work_plan(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        reasoning_effort: str,
+        user_request: str,
+        tool_catalog: list[dict[str, Any]],
+        workspace_context: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        tool_names = [str(item.get("name") or "") for item in tool_catalog if item.get("name")]
+        if not tool_names:
+            raise ProviderError("No tools are available for work-plan drafting")
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "plan_title": {"type": "string", "minLength": 1, "maxLength": 300},
+                "summary": {"type": "string", "minLength": 1, "maxLength": 3000},
+                "limitations": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {"type": "string", "maxLength": 1000},
+                },
+                "steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "minLength": 1, "maxLength": 300},
+                            "description": {"type": "string", "minLength": 1, "maxLength": 1500},
+                            "tool_name": {"type": "string", "enum": tool_names},
+                            "arguments_json": {
+                                "type": "string",
+                                "minLength": 2,
+                                "maxLength": 20000,
+                            },
+                            "depends_on_positions": {
+                                "type": "array",
+                                "maxItems": 12,
+                                "items": {"type": "integer", "minimum": 1, "maximum": 12},
+                            },
+                        },
+                        "required": [
+                            "title",
+                            "description",
+                            "tool_name",
+                            "arguments_json",
+                            "depends_on_positions",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["plan_title", "summary", "limitations", "steps"],
+            "additionalProperties": False,
+        }
+        instructions = """Draft a concrete executable work plan for DeskAI Work.
+
+Each step MUST call exactly one tool from the supplied catalog. Use the tool's parameter schema and provide the exact arguments as a JSON object serialized into arguments_json.
+
+The workspace context contains only authorized file metadata and may be used to select stable file_id values. Dependencies must refer only to EARLIER 1-based step positions. Keep the plan minimal and acyclic.
+
+A later step may reference structured output from one of its declared dependency steps by placing a placeholder in arguments_json, for example {{step:1.result.answer}}, {{step:2.result.value}}, or {{step:1.result.files.0.file_id}}. References must point only to declared earlier dependencies. Use references when an argument is genuinely produced by a prior step; do not invent values.
+
+Read/search/analysis/new-artifact tools may execute automatically after the user starts the plan. Any propose_* tool only stages an existing Phase 11-16 file transaction; it does not modify a source file. A plan will pause immediately after such a proposal and wait for the human to use the original desktop confirmation flow before continuing.
+
+Never invent a direct confirmation, overwrite, rollback, restore, purge, shell, browser, arbitrary Python, arbitrary URL fetch, permission change, or other tool that is not present in the catalog. If the requested outcome cannot be fully completed with available tools, state that in limitations instead of fabricating a step."""
+        catalog_text = json.dumps(tool_catalog, ensure_ascii=False, separators=(",", ":"))
+        context_text = json.dumps(workspace_context, ensure_ascii=False, separators=(",", ":"))
+        user_input = (
+            "<user_request>\n"
+            + user_request
+            + "\n</user_request>\n\n<workspace_context>\n"
+            + context_text
+            + "\n</workspace_context>\n\n<tool_catalog>\n"
+            + catalog_text
+            + "\n</tool_catalog>"
+        )
+        try:
+            client = AsyncOpenAI(api_key=api_key)
+            response = await client.responses.create(
+                model=model,
+                instructions=instructions,
+                input=[{"role": "user", "content": user_input}],
+                reasoning={"effort": reasoning_effort},
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "deskai_work_plan",
+                        "strict": True,
+                        "schema": schema,
+                    }
+                },
+                store=False,
+            )
+            payload = json.loads(response.output_text or "{}")
+            if not isinstance(payload, dict):
+                raise ProviderError("Work-plan response was not a JSON object")
+            return payload
+        except (OpenAIError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProviderError(f"Work-plan drafting failed: {exc}") from exc
+
+
     async def web_search(
         self,
         *,

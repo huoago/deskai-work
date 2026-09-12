@@ -13,6 +13,7 @@ import {
   exportRecoveryEvidencePackage,
   createMemory,
   createTask,
+  draftWorkPlan,
   createWorkspace,
   deactivateMemory,
   deleteOpenAIApiKey,
@@ -50,10 +51,13 @@ import {
   rejectRecycleBatch,
   retryMemoryQueue,
   retryTask,
+  retryWorkPlan,
+  resumeWorkPlan,
   rollbackSourceFileEdit,
   rollbackSourceFileEditBatch,
   rollbackFileOrganization,
   rollbackFileOrganizationBatch,
+  startWorkPlan,
   restoreRecycledFile,
   restoreRecycleBatch,
   revokeWorkspaceRoot,
@@ -65,6 +69,7 @@ import {
   updateDesktopSettings,
   updateMemory,
   updateWorkspaceRoot,
+  cancelWorkPlan,
   type ActivityRecord,
   type AgentStatus,
   type ChatMessage,
@@ -90,6 +95,7 @@ import {
   type WatcherStatus,
   type Workspace,
   type WorkspaceRoot,
+  type WorkPlanRecord,
 } from "./lib/engine";
 
 type EngineState =
@@ -639,6 +645,24 @@ export default function App() {
     }
   }
 
+  async function onCreatePlannedTask() {
+    if (!activeWorkspaceId || !taskRequest.trim()) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const task = await createTask(activeWorkspaceId, taskRequest.trim(), undefined, "plan");
+      await draftWorkPlan(task.id);
+      setTaskRequest("");
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(task.id));
+      setNotice("多步骤工作计划已生成。请先审阅步骤，再点击“开始执行计划”。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "生成多步骤工作计划失败");
+      await refreshWorkspaceData().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
+  }
   async function onSelectTask(taskId: string) {
     try {
       setTaskDetail(await getTask(taskId));
@@ -1060,6 +1084,68 @@ export default function App() {
     }
   }
 
+  async function onStartWorkPlan(plan: WorkPlanRecord) {
+    if (!window.confirm("开始执行这个多步骤计划吗？只读/分析/新建成果步骤会按依赖自动执行；任何现有文件变更只会生成原安全提案并暂停等待你的确认。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await startWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(result.status === "awaiting_confirmation" ? "计划已执行到人工确认门禁。请在下方审核对应文件提案，确认后再点击“继续计划”。" : result.status === "completed" ? "多步骤工作计划已完成。" : `计划状态：${result.status}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "启动工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onResumeWorkPlan(plan: WorkPlanRecord) {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await resumeWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(result.status === "completed" ? "人工确认已被计划状态机识别，后续步骤执行完成。" : result.status === "blocked" ? "计划未绕过被拒绝或异常的文件动作，已安全阻断。" : `计划已继续，当前状态：${result.status}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "继续工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onRetryWorkPlan(plan: WorkPlanRecord) {
+    if (!window.confirm("重试失败/中断的计划步骤吗？DeskAI 不会自动重试已经创建过文件提案的步骤。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await retryWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice(result.status === "completed" ? "重试后计划已完成。" : `重试后状态：${result.status}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重试工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCancelWorkPlan(plan: WorkPlanRecord) {
+    if (!window.confirm("取消这个工作计划吗？尚未执行的步骤会停止；已经生成的文件提案不会被自动拒绝或删除，仍由你单独处理。")) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      await cancelWorkPlan(plan.id);
+      await refreshWorkspaceData();
+      setTaskDetail(await getTask(plan.task_id));
+      setNotice("工作计划已取消；已有提案保持原状态，没有执行额外文件操作。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "取消工作计划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function onSaveApiKey() {
     const key = apiKeyDraft.trim();
     if (!key || providerAction) return;
@@ -1261,6 +1347,7 @@ export default function App() {
             setRequest={setTaskRequest}
             disabled={!online || busy}
             onCreate={onCreateTask}
+            onCreatePlan={onCreatePlannedTask}
             onSelect={onSelectTask}
             onRetry={onRetryTask}
             onProcess={onProcessAgentQueue}
@@ -1282,6 +1369,10 @@ export default function App() {
             onConfirmRecycleBatch={onConfirmRecycleBatch}
             onRejectRecycleBatch={onRejectRecycleBatch}
             onRestoreRecycleBatch={onRestoreRecycleBatch}
+            onStartWorkPlan={onStartWorkPlan}
+            onResumeWorkPlan={onResumeWorkPlan}
+            onRetryWorkPlan={onRetryWorkPlan}
+            onCancelWorkPlan={onCancelWorkPlan}
           />
         ) : page === "recovery" ? (
           <RecoveryPage
@@ -1373,7 +1464,7 @@ function ChatPage({ workspace, conversations, activeConversationId, setActiveCon
       <div className="chat-panel">
         <div className="chat-context">
           <div><span className="eyebrow">当前工作区</span><strong>{workspace?.name ?? "未选择"}</strong></div>
-          <span className="phase-chip">Phase 21 · AI + 文件事务 + 恢复证据导出</span>
+          <span className="phase-chip">Phase 22 · 持久化多步骤工作计划</span>
         </div>
         <div className="messages">
           {!messages.length && !pendingUser && (
@@ -1805,7 +1896,7 @@ function renderMemoryValue(value: unknown): string {
   }
 }
 
-function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch }: {
+function TasksPage({ workspace, tasks, status, detail, request, setRequest, disabled, onCreate, onCreatePlan, onSelect, onRetry, onProcess, onConfirmEdit, onRejectEdit, onRollbackEdit, onConfirmBatch, onRejectBatch, onRollbackBatch, onConfirmOrganization, onRejectOrganization, onRollbackOrganization, onConfirmOrganizationBatch, onRejectOrganizationBatch, onRollbackOrganizationBatch, onConfirmRecycle, onRejectRecycle, onRestoreRecycle, onConfirmRecycleBatch, onRejectRecycleBatch, onRestoreRecycleBatch, onStartWorkPlan, onResumeWorkPlan, onRetryWorkPlan, onCancelWorkPlan }: {
   workspace: Workspace | null;
   tasks: TaskRecord[];
   status: AgentStatus | null;
@@ -1814,6 +1905,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   setRequest: (value: string) => void;
   disabled: boolean;
   onCreate: () => void;
+  onCreatePlan: () => void;
   onSelect: (taskId: string) => void;
   onRetry: (taskId: string) => void;
   onProcess: () => void;
@@ -1835,9 +1927,14 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   onConfirmRecycleBatch: (batchId: string, taskId: string) => void;
   onRejectRecycleBatch: (batchId: string, taskId: string) => void;
   onRestoreRecycleBatch: (batchId: string, taskId: string) => void;
+  onStartWorkPlan: (plan: WorkPlanRecord) => void;
+  onResumeWorkPlan: (plan: WorkPlanRecord) => void;
+  onRetryWorkPlan: (plan: WorkPlanRecord) => void;
+  onCancelWorkPlan: (plan: WorkPlanRecord) => void;
 }) {
-  const pending = tasks.filter((item) => item.status === "pending").length;
+  const pending = tasks.filter((item) => ["pending", "planning", "planned"].includes(item.status)).length;
   const running = tasks.filter((item) => item.status === "running").length;
+  const waitingConfirmation = tasks.filter((item) => item.status === "awaiting_confirmation").length;
   const completed = tasks.filter((item) => item.status === "completed").length;
   const attention = tasks.filter((item) => ["failed", "blocked"].includes(item.status)).length;
   const edits = detail?.file_edits ?? [];
@@ -1855,6 +1952,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
       <div className="knowledge-status-grid">
         <Metric label="待执行" value={String(pending)} />
         <Metric label="执行中" value={String(running)} />
+        <Metric label="待人工确认" value={String(waitingConfirmation)} />
         <Metric label="已完成" value={String(completed)} />
         <Metric label="需处理" value={String(attention)} />
         <Metric label="Agent Worker" value={status?.running ? "运行中" : "未运行"} />
@@ -1863,8 +1961,8 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
       <article className="panel task-create-panel">
         <div className="panel-head">
           <div>
-            <h3>创建 Agent 任务</h3>
-            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。Agent 可读取授权资料、分析表格、生成新文件、进行带来源的 Web Research，为 TXT/MD/DOCX/XLSX 生成编辑事务，并提出编辑、文件整理、单文件回收及 2–10 文件事务化回收提案；所有源文件写入、路径变更和回收操作都必须由你确认。</p>
+            <h3>创建工作任务</h3>
+            <p className="muted small">当前 Workspace：{workspace?.name ?? "未选择"}。可继续使用即时 Agent，也可以先生成 Phase 22 多步骤计划。计划会持久化步骤、依赖、风险和执行结果；现有文件编辑/整理/回收仍只生成原 Phase 11–16 提案，并在人工确认门禁处暂停。</p>
           </div>
           <button className="secondary" onClick={onProcess} disabled={disabled || pending === 0}>立即处理队列</button>
         </div>
@@ -1878,8 +1976,11 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
           }}
         />
         <div className="task-submit-row">
-          <span>Ctrl/⌘ + Enter 创建任务</span>
-          <button className="primary" onClick={onCreate} disabled={disabled || !request.trim()}>交给 Agent</button>
+          <span>Ctrl/⌘ + Enter：即时 Agent</span>
+          <div className="button-row">
+            <button className="secondary" onClick={onCreatePlan} disabled={disabled || !request.trim()}>生成多步骤计划</button>
+            <button className="primary" onClick={onCreate} disabled={disabled || !request.trim()}>交给 Agent</button>
+          </div>
         </div>
       </article>
 
@@ -1895,7 +1996,7 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
               >
                 <div>
                   <strong>{task.title}</strong>
-                  <span>{formatDate(task.created_at)}</span>
+                  <span>{task.execution_mode === "plan" ? "多步骤计划" : "即时 Agent"} · {formatDate(task.created_at)}</span>
                 </div>
                 <div className="task-row-status">
                   <span className={`task-status ${task.status}`}>{taskStatusLabel(task.status)}</span>
@@ -1920,6 +2021,18 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
 
               {detail.result_text && <div className="task-result"><strong>Agent 结果</strong><p>{detail.result_text}</p></div>}
               {detail.error_message && <div className="provider-error">状态说明：{detail.error_message}</div>}
+
+              {detail.work_plans.map((plan) => (
+                <WorkPlanPanel
+                  key={plan.id}
+                  plan={plan}
+                  disabled={disabled}
+                  onStart={onStartWorkPlan}
+                  onResume={onResumeWorkPlan}
+                  onRetry={onRetryWorkPlan}
+                  onCancel={onCancelWorkPlan}
+                />
+              ))}
 
               {recycleBatches.length > 0 && (
                 <div className="source-edit-section recycle-section batch-transaction-section">
@@ -2278,12 +2391,13 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
                 </div>
               )}
 
-              {["failed", "blocked"].includes(detail.status) && (
+              {detail.execution_mode === "agent" && ["failed", "blocked"].includes(detail.status) && (
                 <button className="secondary" onClick={() => onRetry(detail.id)} disabled={disabled}>重新入队</button>
               )}
 
               <div className="task-run-summary">
                 <span>运行 {detail.runs.length} 次</span>
+                <span>工作计划 {detail.work_plans.length} 个</span>
                 <span>工具调用 {detail.tool_calls.length} 次</span>
                 <span>生成文件 {detail.artifacts.length} 个</span>
                 <span>单文件提案 {singleEdits.length} 个</span>
@@ -2313,6 +2427,78 @@ function TasksPage({ workspace, tasks, status, detail, request, setRequest, disa
   );
 }
 
+function WorkPlanPanel({ plan, disabled, onStart, onResume, onRetry, onCancel }: {
+  plan: WorkPlanRecord;
+  disabled: boolean;
+  onStart: (plan: WorkPlanRecord) => void;
+  onResume: (plan: WorkPlanRecord) => void;
+  onRetry: (plan: WorkPlanRecord) => void;
+  onCancel: (plan: WorkPlanRecord) => void;
+}) {
+  return (
+    <div className="source-edit-section batch-transaction-section work-plan-section">
+      <div className="artifact-section-head">
+        <div>
+          <span className="eyebrow">Phase 22 · 持久化工作计划</span>
+          <strong>{plan.title}</strong>
+        </div>
+        <span className={`task-status ${plan.status}`}>{workPlanStatusLabel(plan.status)}</span>
+      </div>
+      <p>{plan.summary}</p>
+      <div className="task-progress-track"><span style={{ width: `${Math.round(plan.progress * 100)}%` }} /></div>
+      {plan.limitations.length > 0 && (
+        <div className="recovery-guidance-grid">
+          <div>
+            <strong>计划边界</strong>
+            <ul>{plan.limitations.map((item, index) => <li key={`${plan.id}:limit:${index}`}>{item}</li>)}</ul>
+          </div>
+        </div>
+      )}
+      {plan.error_message && <div className="provider-error">{plan.error_message}</div>}
+      <div className="source-edit-list">
+        {plan.steps.map((step) => (
+          <article className="source-edit-card work-plan-step-card" key={step.id}>
+            <div className="source-edit-head">
+              <div>
+                <strong>{step.position}. {step.title}</strong>
+                <span>{step.tool_name} · 风险 L{step.risk_level} · {step.execution_mode === "proposal_gate" ? "人工确认门禁" : "自动步骤"}</span>
+              </div>
+              <span className={`task-status ${step.status}`}>{workPlanStepStatusLabel(step.status)}</span>
+            </div>
+            <p>{step.description}</p>
+            <div className="source-edit-hash">
+              <small>依赖：{step.dependencies.length ? step.dependencies.map((value) => `#${value}`).join(" / ") : "无"}</small>
+              {step.tool_call_id && <small>ToolCall {step.tool_call_id.slice(0, 8)}…</small>}
+            </div>
+            <details className="recovery-evidence">
+              <summary>查看计划参数</summary>
+              <pre className="edit-diff-preview">{JSON.stringify(step.arguments, null, 2)}</pre>
+            </details>
+            {step.result_summary && (
+              <details className="recovery-evidence">
+                <summary>查看步骤结果</summary>
+                <pre className="edit-diff-preview">{step.result_summary}</pre>
+              </details>
+            )}
+            {step.error_message && <div className="provider-error">{step.error_message}</div>}
+            {step.status === "awaiting_confirmation" && (
+              <div className="provider-warning">
+                已生成原有安全文件提案 {step.external_entity_type} / {step.external_entity_id?.slice(0, 8)}…。请在本任务下方对应提案卡片完成原人工确认；确认成功后再点击“继续计划”。
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+      <div className="button-row">
+        {plan.can_start && <button className="primary" disabled={disabled} onClick={() => onStart(plan)}>开始执行计划</button>}
+        {plan.can_resume && <button className="primary" disabled={disabled} onClick={() => onResume(plan)}>继续计划</button>}
+        {plan.can_retry && <button className="secondary" disabled={disabled} onClick={() => onRetry(plan)}>重试中断/失败步骤</button>}
+        {plan.can_cancel && <button className="secondary" disabled={disabled} onClick={() => onCancel(plan)}>取消计划</button>}
+      </div>
+      <p className="artifact-policy-note">计划执行仍通过原 ToolRegistry、PermissionGate 与 AuditLog。propose_* 步骤只创建既有文件事务提案；计划自身没有确认、覆盖、删除、回滚或恢复文件的特殊权限。</p>
+    </div>
+  );
+}
 function RecoveryPage({
   entries,
   disabled,
@@ -2966,11 +3152,42 @@ function sourceEditStatusLabel(status: string) {
 
 function taskStatusLabel(status: string) {
   const labels: Record<string, string> = {
+    planning: "计划生成中",
+    planned: "待开始计划",
     pending: "待执行",
     running: "执行中",
+    awaiting_confirmation: "等待人工确认",
     completed: "已完成",
     failed: "失败",
     blocked: "已阻断",
+    cancelled: "已取消",
+  };
+  return labels[status] ?? status;
+}
+
+function workPlanStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    ready: "待开始",
+    running: "执行中",
+    awaiting_confirmation: "等待人工确认",
+    completed: "已完成",
+    failed: "失败",
+    blocked: "已阻断",
+    paused: "中断待重试",
+    cancelled: "已取消",
+  };
+  return labels[status] ?? status;
+}
+
+function workPlanStepStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    pending: "待执行",
+    running: "执行中",
+    awaiting_confirmation: "等待人工确认",
+    completed: "已完成",
+    failed: "失败",
+    interrupted: "中断",
+    cancelled: "已取消",
   };
   return labels[status] ?? status;
 }
@@ -2983,6 +3200,19 @@ function activityLabel(action: string) {
     agent_blocked: "Agent 被策略阻断",
     agent_interrupted: "Agent 异常中断",
     worker_failed: "Worker 失败",
+    work_plan_drafted: "工作计划已生成",
+    work_plan_started: "工作计划开始",
+    work_plan_resumed: "工作计划继续",
+    work_plan_retried: "工作计划重试",
+    work_plan_step_completed: "计划步骤完成",
+    work_plan_step_failed: "计划步骤失败",
+    work_plan_waiting_confirmation: "计划等待人工确认",
+    work_plan_confirmation_observed: "计划已识别人工确认",
+    work_plan_gate_blocked: "计划确认门禁阻断",
+    work_plan_completed: "工作计划完成",
+    work_plan_failed: "工作计划失败",
+    work_plan_cancelled: "工作计划取消",
+    work_plan_interrupted: "工作计划中断",
     tool_completed: "工具调用完成",
     tool_failed: "工具调用失败",
     tool_denied: "工具调用被拒绝",
@@ -3106,7 +3336,7 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
       </article>
 
       <article className="panel settings-card">
-        <div className="panel-head"><h3>安全状态</h3><span>Phase 21</span></div>
+        <div className="panel-head"><h3>安全状态</h3><span>Phase 22</span></div>
         <div className="security-list">
           <p><b>✓</b> Engine 仅监听 127.0.0.1</p>
           <p><b>✓</b> Tauri 与 Engine 使用临时 Session Token</p>
@@ -3138,6 +3368,9 @@ function SettingsPage({ values, onChange, dirty, busy, onSave, providerStatus, a
           <p><b>✓</b> Phase 20 解冻只修正事务/File 元数据，绝不修改用户文件；文件动作仍只能走原 rollback/restore 安全 API</p>
           <p><b>✓</b> Phase 21 证据包只写入 DeskAI generated 沙箱，包含元数据/诊断/快照/SHA/审计，不嵌入 Workspace、备份或隔离副本文件内容</p>
           <p><b>✓</b> Phase 21 不改变 recovery/reconciliation 状态，不执行 rollback/restore，不提供 Agent 导出或任意输出路径</p>
+          <p><b>✓</b> Phase 22 多步骤计划的工具风险由本地 PermissionGate 重新计算，模型不能降低风险等级或发明未注册工具</p>
+          <p><b>✓</b> Phase 22 现有文件动作只能运行 propose_* 提案工具，并在原人工确认门禁处暂停；Resume 只在原事务状态证明 applied/recycled 后继续</p>
+          <p><b>✓</b> Engine 中断不会自动重放正在执行的计划步骤；计划冻结为 paused/interrupted，必须人工 Retry</p>
         </div>
       </article>
     </section>

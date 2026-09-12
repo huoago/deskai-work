@@ -616,3 +616,23 @@ Security invariants:
 - Phase 21 exposes no Agent tool for evidence export;
 - the generated ZIP itself is SHA-256 recorded as a GeneratedArtifact and the package manifest hashes every internal evidence member.
 
+## Phase 22 — Controlled multi-step work plans
+
+Phase 22 adds orchestration state, not new filesystem authority.
+
+Security invariants:
+
+- plan-mode Tasks are isolated from the legacy Agent Worker;
+- model-drafted steps must select an already registered ToolRegistry tool;
+- PermissionGate is evaluated locally and the persisted risk level/execution mode come from local policy, not model output;
+- automatic steps are limited to permitted tools with existing non-confirmation policy; high-risk existing-file actions are proposal-only `propose_*` tools;
+- any `propose_*` step pauses the plan immediately after the original Phase 11–16 proposal is persisted;
+- Resume only observes the original proposal state and continues after `applied` or `recycled` as appropriate;
+- the plan exposes no new source-write, rename/move, recycle, rollback, restore, reconciliation, purge, overwrite or ignore-SHA endpoint;
+- result references can read only persisted structured results of explicitly declared earlier dependency steps;
+- cancellation preserves already-created external proposals instead of mutating them implicitly;
+- rejected/ambiguous confirmation gates block the plan and cannot trigger automatic replanning;
+- Engine restart freezes a running plan rather than replaying an unproven step;
+- interrupted steps require explicit Retry, and steps that already created persistent file proposals cannot be automatically retried;
+- all actual tool executions continue to create ToolCall and AuditLog records under the original policy.
+

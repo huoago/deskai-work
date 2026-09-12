@@ -29,6 +29,7 @@ from app.api.source_edit_batches import router as source_edit_batches_router
 from app.api.source_edits import router as source_edits_router
 from app.api.tasks import router as tasks_router
 from app.api.workspaces import router as workspace_router
+from app.api.work_plans import router as work_plans_router
 from app.agent.orchestrator import AgentOrchestrator
 from app.agent.tools import ToolRegistry
 from app.agent.worker import AgentWorker
@@ -55,6 +56,7 @@ from app.security.secrets import SecretStore
 from app.source_edits.batch_service import SourceFileEditBatchService
 from app.source_edits.service import SourceFileEditService
 from app.web.service import WebResearchService
+from app.work_plans.service import WorkPlanService
 
 ALLOWED_DESKTOP_ORIGINS = [
     "http://127.0.0.1:1420",
@@ -181,6 +183,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             file_recycle_batch_service,
         )
         app.state.tool_registry = tool_registry
+        work_plan_service = WorkPlanService(
+            app.state.database,
+            app.state.secret_store,
+            app.state.openai_provider,
+            tool_registry,
+            source_edit_service,
+            source_edit_batch_service,
+            file_organization_service,
+            file_organization_batch_service,
+            file_recycle_service,
+            file_recycle_batch_service,
+        )
+        app.state.work_plan_service = work_plan_service
+        work_plan_service.recover_interrupted()
         agent_orchestrator = AgentOrchestrator(
             app.state.database,
             app.state.secret_store,
@@ -266,4 +282,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(source_edit_batches_router)
     app.include_router(source_edits_router)
     app.include_router(tasks_router)
+    app.include_router(work_plans_router)
     return app

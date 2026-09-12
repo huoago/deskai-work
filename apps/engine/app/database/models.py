@@ -204,6 +204,7 @@ class Task(Base):
     workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id", ondelete="SET NULL"), index=True)
     title: Mapped[str] = mapped_column(String(1024), nullable=False)
     user_request: Mapped[str] = mapped_column(Text, nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(32), default="agent", nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
     progress: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     result_text: Mapped[str | None] = mapped_column(Text)
@@ -401,6 +402,76 @@ class RecoveryReconciliationProposal(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkPlan(Base):
+    __tablename__ = "work_plans"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(1024), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    limitations_json: Mapped[Any] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        default="ready",
+        nullable=False,
+        index=True,
+    )
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkPlanStep(Base):
+    __tablename__ = "work_plan_steps"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    plan_id: Mapped[str] = mapped_column(
+        ForeignKey("work_plans.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(1024), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    arguments_json: Mapped[Any] = mapped_column(JSON, nullable=False)
+    dependencies_json: Mapped[Any] = mapped_column(JSON, default=list, nullable=False)
+    risk_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        default="pending",
+        nullable=False,
+        index=True,
+    )
+    result_summary: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[Any | None] = mapped_column(JSON)
+    tool_call_id: Mapped[str | None] = mapped_column(String(36))
+    external_entity_type: Mapped[str | None] = mapped_column(String(64))
+    external_entity_id: Mapped[str | None] = mapped_column(String(36))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        nullable=False,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AgentRun(Base):

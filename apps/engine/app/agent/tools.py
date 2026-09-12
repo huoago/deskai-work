@@ -83,6 +83,33 @@ class ToolRegistry:
             "propose_file_recycle_batch": self._propose_file_recycle_batch,
         }
 
+    def planning_catalog(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
+        catalog: list[dict[str, Any]] = []
+        for spec in self._specs.values():
+            decision = self.permission_gate.check(
+                workspace_id=workspace_id,
+                tool_name=spec.name,
+            )
+            if not decision.allowed or decision.requires_confirmation:
+                continue
+            execution_mode = (
+                "proposal_gate"
+                if spec.name.startswith("propose_")
+                else "auto"
+            )
+            if execution_mode == "auto" and decision.risk_level > 3:
+                continue
+            catalog.append(
+                {
+                    "name": spec.name,
+                    "description": spec.description,
+                    "parameters": spec.parameters,
+                    "risk_level": decision.risk_level,
+                    "execution_mode": execution_mode,
+                }
+            )
+        return catalog
+
     def definitions(self, *, workspace_id: str | None) -> list[dict[str, Any]]:
         definitions: list[dict[str, Any]] = []
         for spec in self._specs.values():

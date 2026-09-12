@@ -79,9 +79,9 @@ try {
 
   Write-Host "Packaged Agent endpoint OK: running=$($agent.running)"
 
-  if ([string]$health.version -ne "0.21.0") {
+  if ([string]$health.version -ne "0.22.0") {
     Write-EngineLogs
-    throw "Expected packaged engine version 0.21.0, got $($health.version)."
+    throw "Expected packaged engine version 0.22.0, got $($health.version)."
   }
 
   try {
@@ -210,6 +210,31 @@ try {
   }
 
   Write-Host "Packaged Recovery Evidence endpoint OK: schema=$($evidenceCapabilities.schema)"
+
+  $workPlanListRoute = "/work-plans"
+  $workPlanDraftRoute = "/tasks/{task_id}/work-plan"
+  $workPlanResumeRoute = "/work-plans/{plan_id}/resume"
+  if ($null -eq $openApi.paths.PSObject.Properties[$workPlanListRoute]) {
+    Write-EngineLogs
+    throw "Packaged Work Plan list route is missing from OpenAPI."
+  }
+  if ($null -eq $openApi.paths.PSObject.Properties[$workPlanDraftRoute]) {
+    Write-EngineLogs
+    throw "Packaged Work Plan draft route is missing from OpenAPI."
+  }
+  if ($null -eq $openApi.paths.PSObject.Properties[$workPlanResumeRoute]) {
+    Write-EngineLogs
+    throw "Packaged Work Plan resume route is missing from OpenAPI."
+  }
+
+  try {
+    $workPlans = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/work-plans" -Headers @{"X-DeskAI-Token"=$Token} -TimeoutSec 5
+  } catch {
+    Write-EngineLogs
+    throw "Packaged Work Plan API failed: $($_.Exception.Message)"
+  }
+
+  Write-Host "Packaged Work Plan endpoint OK: count=$(@($workPlans).Count)"
 } finally {
   if (!$process.HasExited) {
     Stop-Process -Id $process.Id -Force

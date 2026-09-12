@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -16,6 +16,7 @@ class TaskCreate(BaseModel):
     workspace_id: str
     request: str = Field(min_length=1, max_length=20000)
     title: str | None = Field(default=None, max_length=1024)
+    execution_mode: Literal["agent", "plan"] = "agent"
 
 
 def _task_payload(task: Task) -> dict[str, Any]:
@@ -24,6 +25,7 @@ def _task_payload(task: Task) -> dict[str, Any]:
         "workspace_id": task.workspace_id,
         "title": task.title,
         "user_request": task.user_request,
+        "execution_mode": task.execution_mode,
         "status": task.status,
         "progress": task.progress,
         "result_text": task.result_text,
@@ -43,15 +45,17 @@ def create_task(payload: TaskCreate, request: Request) -> dict[str, Any]:
         title = (payload.title or payload.request.strip().splitlines()[0][:80]).strip()
         task = Task(
             workspace_id=payload.workspace_id,
-            title=title or "Agent task",
+            title=title or ("Work plan" if payload.execution_mode == "plan" else "Agent task"),
             user_request=payload.request.strip(),
-            status="pending",
+            execution_mode=payload.execution_mode,
+            status="planning" if payload.execution_mode == "plan" else "pending",
             progress=0.0,
         )
         session.add(task)
         session.flush()
         result = _task_payload(task)
-    request.app.state.agent_worker.wake()
+    if payload.execution_mode == "agent":
+        request.app.state.agent_worker.wake()
     return result
 
 
@@ -142,6 +146,10 @@ def task_detail(task_id: str, request: Request) -> dict[str, Any]:
     payload["recycle_batches"] = request.app.state.file_recycle_batch_service.list(
         task_id=task_id,
         limit=100,
+    )
+    payload["work_plans"] = request.app.state.work_plan_service.list(
+        task_id=task_id,
+        limit=20,
     )
     return payload
 
