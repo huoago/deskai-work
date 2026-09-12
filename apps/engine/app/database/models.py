@@ -460,6 +460,7 @@ class WorkPlanStep(Base):
         index=True,
     )
     result_summary: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[Any | None] = mapped_column(JSON)
     tool_call_id: Mapped[str | None] = mapped_column(String(36))
     external_entity_type: Mapped[str | None] = mapped_column(String(64))
     external_entity_id: Mapped[str | None] = mapped_column(String(36))
