@@ -217,7 +217,9 @@ export type TaskRecord = {
     | "planning"
     | "planned"
     | "pending"
+    | "queued"
     | "running"
+    | "cancelling"
     | "awaiting_confirmation"
     | "completed"
     | "failed"
@@ -484,7 +486,9 @@ export type WorkPlanRecord = {
   limitations: string[];
   status:
     | "ready"
+    | "queued"
     | "running"
+    | "cancelling"
     | "awaiting_confirmation"
     | "completed"
     | "failed"
@@ -529,6 +533,19 @@ export type AgentStatus = {
   last_error: string | null;
   workspace_id: string | null;
   task_counts: Record<string, number>;
+};
+
+export type WorkPlanWorkerStatus = {
+  running: boolean;
+  processed: number;
+  completed: number;
+  failed: number;
+  blocked: number;
+  awaiting_confirmation: number;
+  cancelled: number;
+  last_plan_id: string | null;
+  last_completed_at: string | null;
+  last_error: string | null;
 };
 
 export type ActivityRecord = {
@@ -1045,6 +1062,19 @@ export function rejectRecycleBatch(batchId: string): Promise<FileRecycleBatchRec
 
 export function restoreRecycleBatch(batchId: string): Promise<FileRecycleBatchRecord> {
   return request<FileRecycleBatchRecord>(`/recycle-batches/${batchId}/restore`, { method: "POST" });
+}
+
+export function getWorkPlanWorkerStatus(): Promise<WorkPlanWorkerStatus> {
+  return request<WorkPlanWorkerStatus>("/work-plan-worker/status");
+}
+
+export function processWorkPlanQueue(
+  limit = 3,
+): Promise<{ processed: number; worker: WorkPlanWorkerStatus }> {
+  return request(
+    `/work-plan-worker/process?limit=${encodeURIComponent(String(limit))}`,
+    { method: "POST" },
+  );
 }
 
 export function getAgentStatus(workspaceId?: string): Promise<AgentStatus> {
