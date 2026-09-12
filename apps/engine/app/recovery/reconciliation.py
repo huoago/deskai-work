@@ -291,15 +291,12 @@ class RecoveryReconciliationService:
             raise ValueError(
                 "Recovery reconciliation requires one consistent verified disk state"
             )
-        if not assessment.get("technical_action_preconditions_satisfied"):
-            raise ValueError(
-                "Recovery reconciliation requires all historical action artifacts"
-            )
 
         entity_type = snapshot["entity_type"]
         state = assessment.get("state")
         action = assessment.get("action_after_reconciliation")
 
+        target: tuple[str, str] | None = None
         if (
             entity_type
             in {
@@ -311,18 +308,25 @@ class RecoveryReconciliationService:
             and state == "consistent_applied"
             and action == "rollback"
         ):
-            return "applied", "rollback"
-
-        if (
+            target = ("applied", "rollback")
+        elif (
             entity_type in {"file_recycle", "file_recycle_batch"}
             and state == "consistent_recycled"
             and action == "restore"
         ):
-            return "recycled", "restore"
+            target = ("recycled", "restore")
 
-        raise ValueError(
-            "Phase 20 only reconciles verified applied or recycled states"
-        )
+        if target is None:
+            raise ValueError(
+                "Phase 20 only reconciles verified applied or recycled states"
+            )
+
+        if not assessment.get("technical_action_preconditions_satisfied"):
+            raise ValueError(
+                "Recovery reconciliation requires all historical action artifacts"
+            )
+
+        return target
 
     def _apply_metadata_reconciliation(
         self,
