@@ -29,6 +29,8 @@ class Settings:
     memory_worker_interval_seconds: float = 1.25
     agent_worker_enabled: bool = True
     agent_worker_interval_seconds: float = 1.0
+    work_plan_worker_enabled: bool = True
+    work_plan_worker_interval_seconds: float = 1.0
 
     @classmethod
     def load(cls, *, session_token: str | None = None) -> "Settings":
@@ -56,6 +58,15 @@ class Settings:
             not in {"0", "false", "False"},
             agent_worker_interval_seconds=max(
                 float(os.environ.get("DESKAI_AGENT_WORKER_INTERVAL", "1.0")), 0.5
+            ),
+            work_plan_worker_enabled=os.environ.get(
+                "DESKAI_WORK_PLAN_WORKER_ENABLED",
+                "1",
+            )
+            not in {"0", "false", "False"},
+            work_plan_worker_interval_seconds=max(
+                float(os.environ.get("DESKAI_WORK_PLAN_WORKER_INTERVAL", "1.0")),
+                0.5,
             ),
         )
 
