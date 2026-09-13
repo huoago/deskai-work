@@ -61,6 +61,34 @@ def test_phase28_scoring_math_is_deterministic():
     assert report.recall_at_1 == 0.5
     assert report.recall_at_5 == 0.5
     assert report.mrr == 0.5
+    assert report.answer_accuracy == 0.5
+    assert report.evidence_accuracy == 0.5
+
+
+def test_phase28_hallucination_metric_is_complement_of_no_evidence_accuracy():
+    _, cases = build_engineering_benchmark_v1()
+    negative = [case for case in cases if not case.answerable][:2]
+
+    calls = 0
+
+    def fake_search(question: str, limit: int) -> list[dict]:
+        nonlocal calls
+        del question, limit
+        calls += 1
+        if calls == 1:
+            return []
+        return [
+            {
+                "filename": "wrong-support.md",
+                "content": "unrelated but lexical support",
+                "citation_label": "wrong-support.md",
+                "lexical_rank": 1,
+            }
+        ]
+
+    report = evaluate_retrieval(negative, fake_search)
+    assert report.no_evidence_accuracy == 0.5
+    assert report.hallucination_rate == 0.5
 
 
 def test_phase28_local_hash_end_to_end_retrieval_gate(client, tmp_path: Path):
@@ -85,7 +113,10 @@ def test_phase28_local_hash_end_to_end_retrieval_gate(client, tmp_path: Path):
     assert report.recall_at_5 >= 0.98, diagnostics
     assert report.recall_at_10 >= 0.98, diagnostics
     assert report.mrr >= 0.92, diagnostics
+    assert report.answer_accuracy >= 0.98, diagnostics
     assert report.evidence_accuracy >= 0.98, diagnostics
     assert report.citation_accuracy >= 0.98, diagnostics
+    assert report.no_evidence_accuracy >= 0.90, diagnostics
+    assert report.hallucination_rate <= 0.10, diagnostics
     for category in ("quantity", "pressure", "date", "role", "status"):
         assert report.category_recall_at_5[category] >= 0.95, diagnostics
