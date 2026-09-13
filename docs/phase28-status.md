@@ -22,29 +22,15 @@ The corpus is intentionally synthetic and contains no production/customer projec
 
 ## Metrics
 
-The common evaluator reports:
+The common evaluator reports Recall@1/5/10, MRR, answer accuracy, evidence-token accuracy, citation-label accuracy, no-evidence accuracy, hallucination rate, category counts, and per-category Recall@5.
 
-- Recall@1;
-- Recall@5;
-- Recall@10;
-- Mean Reciprocal Rank (MRR);
-- answer accuracy;
-- evidence-token accuracy;
-- citation-label accuracy;
-- no-evidence accuracy;
-- hallucination rate;
-- per-category case counts;
-- per-category Recall@5.
-
-For this public deterministic benchmark, `answer_accuracy` is an extractive-ground-truth metric: the authoritative retrieved evidence must contain every required answer token for the case. `hallucination_rate` is the documentary-support false-positive rate on the 10 no-evidence questions and is exactly `1 - no_evidence_accuracy`. These definitions are deterministic and do not require an LLM judge.
-
-The CI gate uses the deterministic `local_hash` provider as a regression floor. This does not claim that `local_hash` is semantic. The exact same benchmark can be run against `local_bge_m3` or `openai` with `apps/engine/scripts/run_rag_benchmark.py`, producing directly comparable JSON reports.
+`answer_accuracy` is deterministic extractive Ground Truth: the authoritative retrieved evidence must contain every required answer token. No-evidence cases carry explicit `support_tokens` for the queried entity/fact. Generic lexical overlap is not treated as evidence; a documentary false positive exists only when returned evidence contains the case-specific support probe. `hallucination_rate` is therefore `1 - no_evidence_accuracy`. These definitions require no LLM judge and are exactly reproducible.
 
 ## CI regression floor
 
-The end-to-end benchmark creates a real Workspace, scans the 18 files, parses them, indexes them, and executes all 100 queries through `/search`.
+The CI gate uses `local_hash` as a deterministic compatibility baseline, not as the semantic-quality target. The test creates a real Workspace, scans 18 files, parses and indexes them, then executes all 100 questions through `/search`.
 
-Initial acceptance thresholds:
+Acceptance thresholds:
 
 - Recall@1 >= 0.90;
 - Recall@5 >= 0.98;
@@ -57,32 +43,35 @@ Initial acceptance thresholds:
 - hallucination rate <= 0.10;
 - each answerable category Recall@5 >= 0.95.
 
-Thresholds are intentionally strict for the synthetic fixture because every answerable question has authoritative ground truth. Future real-project/private acceptance packs may define separate thresholds without weakening this public regression floor.
+The thresholds remain strict. CI #170 exposed an overly broad negative-case definition, not a retrieval-quality miss: all 90 answerable questions scored 1.0 on retrieval/answer/evidence/citation metrics, while generic FTS words incorrectly made no-evidence accuracy appear as 0.0. The evaluator was corrected to use case-specific support probes rather than weakening the threshold.
 
-## Provider comparison
+## Provider comparison and private project packs
 
-The manual runner supports:
+`apps/engine/scripts/run_rag_benchmark.py` supports `local_hash`, `local_bge_m3`, and `openai` using the same evaluator and isolated Workspaces.
 
-- `local_hash` — deterministic compatibility baseline;
-- `local_bge_m3` — true local semantic embedding, requiring the explicitly installed model;
-- `openai` — cloud semantic embedding, requiring configured credentials and Local Only disabled.
+It also supports `--pack <private-ground-truth.json>`. With a private pack:
 
-Provider runs use separate Workspaces so vector dimensions and provider-specific indexes never mix.
+- `--corpus-dir` is read in place and no synthetic files are written there;
+- the private pack stays outside the public repository;
+- answerable cases define `expected_files` and `required_tokens`;
+- no-evidence cases define `support_tokens` for deterministic false-positive scoring;
+- duplicate IDs and inconsistent answerable/no-evidence definitions fail closed;
+- parser/index queues are drained in bounded batches for larger real project corpora.
 
-The public CI does not download BGE-M3 or use cloud credentials. A private/local run can execute the same 100 questions against all three providers and persist comparable JSON reports without changing the benchmark or thresholds.
+This is the path for validating actual Lima project material without publishing that material or its Ground Truth to GitHub. The connected Drive already contains project-wide technical/quality summaries and 311/313/324/DN1500 source material, so a private Lima acceptance pack is feasible. A result is recorded only after those files are deliberately materialized into a DeskAI-accessible private corpus and actually run through the Engine.
+
+The public CI never downloads BGE-M3 and never uses cloud credentials. BGE-M3/OpenAI/private-project runs occur only when the corresponding model, credentials and corpus are deliberately available.
 
 ## Phase 28 completion gates
 
 Phase 28 is complete only when:
 
 - the 100-question benchmark is present and deterministic;
-- benchmark scoring unit tests pass;
-- all 100 questions execute end-to-end through the real indexing/search path;
-- Recall/MRR/answer/citation/no-evidence/hallucination thresholds pass on the deterministic baseline;
+- scoring unit tests pass;
+- all 100 questions execute through real scan -> parse -> index -> `/search`;
+- Recall/MRR/answer/citation/no-evidence/hallucination thresholds pass;
 - Ruff and the full Engine test suite pass;
 - Desktop Web remains green;
 - Windows packaged Engine smoke and NSIS/MSI build remain green;
 - Windows checksum and Artifact upload remain green;
 - the final PR is squash merged and closeout is verified on `main`.
-
-A live BGE-M3/OpenAI provider comparison is recorded only when the corresponding model/credential is deliberately available; Phase 28 does not silently download a model or use cloud credentials in CI.
