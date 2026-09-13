@@ -1,36 +1,50 @@
 # Phase 28 — Engineering RAG Acceptance Benchmark
 
-Status: implementation in progress on `phase28-rag-benchmark`.
+Status: feature implementation merged to `main`; final private Lima semantic acceptance is pending an executable provider run. Phase 28 must not be described as fully accepted until that run is recorded.
 
-## Objective
+## Feature merge
 
-Phase 28 converts retrieval quality from an informal judgement into a repeatable acceptance gate. It does not add Agent authority or new file-writing permissions.
+- Feature PR: #52 — `Phase 28 — Engineering RAG Acceptance Benchmark`
+- Verified feature head: `f30d576ceb2b4d69c4e043248b11bcb9f35e7f4d`
+- Feature squash merge: `8193885f2df6910b7a830db3a411f89826d40082`
+- CI run: #175 / run `34730959107`
+- Desktop Web: success
+- Ruff: success
+- Engine: **188 passed / 301 warnings in 80.06 s**
+- Windows packaged Engine build/smoke: success
+- NSIS/MSI build: success
+- checksum generation and artifact upload: success
 
-## Benchmark design
+### Windows evidence
 
-`build_engineering_benchmark_v1()` produces exactly 100 synthetic engineering questions over 18 synthetic municipal-engineering records:
+- Artifact: `DeskAI-Work-Windows`
+- Artifact ID: `10309566504`
+- Artifact ZIP size: `442,227,141` bytes
+- Artifact ZIP SHA-256: `8e8ec9ff0751d870e14a07f70dfa076055bbb172b5d30a524fe3ee6d59726078`
+- NSIS SHA-256 (independently re-hashed after download): `115d65462d6792b609a0029ad6eedd483e0997d61bfaed80fbe9073f8aed46a9`
+- MSI SHA-256 (independently re-hashed after download): `b6f3e5d40b3bd5ccdda5db274ead1b65849b98da4b34cc2fab39c0d1bd1276e6`
+- `SHA256SUMS.txt` matched both independently computed installer hashes.
+
+## Public deterministic benchmark
+
+`build_engineering_benchmark_v1()` provides exactly 100 public synthetic engineering questions over 18 synthetic municipal-engineering records:
 
 - 90 answerable questions;
 - 10 no-evidence questions;
-- 18 quantity questions;
-- 18 pressure questions;
-- 18 date questions;
-- 18 responsible-role questions;
-- 18 handover-status questions.
+- quantity, pressure, date, responsible-role and handover-status coverage.
 
-The corpus is intentionally synthetic and contains no production/customer project data, personnel details or confidential document identifiers.
+The evaluator reports:
 
-## Metrics
+- Recall@1 / Recall@5 / Recall@10;
+- Mean Reciprocal Rank (MRR);
+- deterministic Answer Accuracy;
+- evidence accuracy;
+- citation accuracy;
+- no-evidence accuracy;
+- Hallucination Rate (`1 - no_evidence_accuracy`);
+- per-category Recall@5.
 
-The common evaluator reports Recall@1/5/10, MRR, answer accuracy, evidence-token accuracy, citation-label accuracy, no-evidence accuracy, hallucination rate, category counts, and per-category Recall@5.
-
-`answer_accuracy` is deterministic extractive Ground Truth: the authoritative retrieved evidence must contain every required answer token. No-evidence cases carry explicit `support_tokens` for the queried entity/fact. Generic lexical overlap is not treated as evidence; a documentary false positive exists only when returned evidence contains the case-specific support probe. `hallucination_rate` is therefore `1 - no_evidence_accuracy`. These definitions require no LLM judge and are exactly reproducible.
-
-## CI regression floor
-
-The CI gate uses `local_hash` as a deterministic compatibility baseline, not as the semantic-quality target. The test creates a real Workspace, scans 18 files, parses and indexes them, then executes all 100 questions through `/search`.
-
-Acceptance thresholds:
+The deterministic `local_hash` CI regression floor remains intentionally strict:
 
 - Recall@1 >= 0.90;
 - Recall@5 >= 0.98;
@@ -43,35 +57,49 @@ Acceptance thresholds:
 - hallucination rate <= 0.10;
 - each answerable category Recall@5 >= 0.95.
 
-The thresholds remain strict. CI #170 exposed an overly broad negative-case definition, not a retrieval-quality miss: all 90 answerable questions scored 1.0 on retrieval/answer/evidence/citation metrics, while generic FTS words incorrectly made no-evidence accuracy appear as 0.0. The evaluator was corrected to use case-specific support probes rather than weakening the threshold.
+CI #170 exposed an overly broad no-evidence scoring rule: generic FTS overlap made all negative cases look supported even though the 90 answerable cases scored 1.0 on retrieval/answer/evidence/citation metrics. The rule was corrected to use case-specific support probes rather than lowering the acceptance threshold.
 
-## Provider comparison and private project packs
+## Provider comparison runner
 
-`apps/engine/scripts/run_rag_benchmark.py` supports `local_hash`, `local_bge_m3`, and `openai` using the same evaluator and isolated Workspaces.
+`apps/engine/scripts/run_rag_benchmark.py` supports isolated runs for:
 
-It also supports `--pack <private-ground-truth.json>`. With a private pack:
+- `local_hash` — deterministic compatibility baseline;
+- `local_bge_m3` — local semantic embedding when the BGE-M3 model is deliberately installed;
+- `openai` — cloud semantic embedding when credentials are deliberately configured and Local Only is disabled.
 
-- `--corpus-dir` is read in place and no synthetic files are written there;
-- the private pack stays outside the public repository;
-- answerable cases define `expected_files` and `required_tokens`;
-- no-evidence cases define `support_tokens` for deterministic false-positive scoring;
-- duplicate IDs and inconsistent answerable/no-evidence definitions fail closed;
-- parser/index queues are drained in bounded batches for larger real project corpora.
+The runner also supports `--pack <private-ground-truth.json>` so real project corpora can be tested without committing project material to the public repository. Private packs fail closed on duplicate IDs and inconsistent answerable/no-evidence definitions and use bounded parser/index draining for larger corpora.
 
-This is the path for validating actual Lima project material without publishing that material or its Ground Truth to GitHub. The connected Drive already contains project-wide technical/quality summaries and 311/313/324/DN1500 source material, so a private Lima acceptance pack is feasible. A result is recorded only after those files are deliberately materialized into a DeskAI-accessible private corpus and actually run through the Engine.
+## Private Lima acceptance pack prepared outside GitHub
 
-The public CI never downloads BGE-M3 and never uses cloud credentials. BGE-M3/OpenAI/private-project runs occur only when the corresponding model, credentials and corpus are deliberately available.
+A private 100-question Lima acceptance pack has now been generated from two connected, real project source documents exported locally and **not committed to GitHub**:
 
-## Phase 28 completion gates
+1. `利马管网项目的技术、质量、测量、变更、绘图、试验经验总结｜V4完整重编版｜2026.txt` (~300 KB)
+2. `秘鲁管网施工标准作业体系_第三版中文扩编版_2026.txt` (~219 KB)
 
-Phase 28 is complete only when:
+Pack structure:
 
-- the 100-question benchmark is present and deterministic;
-- scoring unit tests pass;
-- all 100 questions execute through real scan -> parse -> index -> `/search`;
-- Recall/MRR/answer/citation/no-evidence/hallucination thresholds pass;
-- Ruff and the full Engine test suite pass;
-- Desktop Web remains green;
-- Windows packaged Engine smoke and NSIS/MSI build remain green;
-- Windows checksum and Artifact upload remain green;
-- the final PR is squash merged and closeout is verified on `main`.
+- exactly **100 cases**;
+- **90 answerable + 10 no-evidence**;
+- 53 answerable cases sourced from the project experience summary;
+- 37 answerable cases sourced from the standard-operation-system document;
+- source-derived categories include handover/acceptance, testing, measurement/GIS/As-Built, DN1500 hot tapping, water meters, quality/materials, change/evidence and project data;
+- every answerable Ground Truth token was reverse-checked against its declared source file;
+- Ground Truth source-consistency errors: **0**.
+
+The private pack currently exists only in the controlled local working environment as `lima_rag_acceptance_pack_v1.private.json`. It is intentionally excluded from this public repository.
+
+## Remaining acceptance gate — do not waive
+
+Phase 28 is **not yet fully accepted** because the real Lima pack has not yet been executed end-to-end through the packaged DeskAI Engine with all deliberately available semantic providers.
+
+The current controlled execution environment cannot clone/run the public repository directly (outbound GitHub DNS is unavailable in the container), no BGE-M3 model is present in the local model cache, and no OpenAI API credential is exposed to this runtime. These are execution-environment constraints, not reasons to substitute synthetic results for real-project results.
+
+Final acceptance requires recording, for the private Lima 100-question pack:
+
+1. `local_hash` baseline report;
+2. `local_bge_m3` semantic report after the model is deliberately installed;
+3. `openai` semantic report only when an authorized credential is deliberately configured;
+4. Recall@K, MRR, Answer Accuracy, Citation Accuracy, No-Evidence Accuracy and Hallucination Rate side-by-side;
+5. a clear pass/fail verdict against the agreed real-project thresholds.
+
+Until those results exist, the correct status is: **Phase 28 feature complete and merged; real Lima semantic acceptance pending.**
