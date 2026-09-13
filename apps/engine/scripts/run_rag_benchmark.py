@@ -38,18 +38,24 @@ def _load_private_pack(path: Path) -> tuple[str, list[BenchmarkCase]]:
         answerable = bool(item.get("answerable", True))
         expected_files_raw = item.get("expected_files", [])
         required_tokens_raw = item.get("required_tokens", [])
+        support_tokens_raw = item.get("support_tokens", [])
         if not case_id or not category or not question:
             raise ValueError(f"Case {index} must define id, category and question")
         if case_id in seen_ids:
             raise ValueError(f"Duplicate benchmark case id: {case_id}")
-        if not isinstance(expected_files_raw, list) or not isinstance(required_tokens_raw, list):
-            raise ValueError(f"Case {case_id} expected_files/required_tokens must be arrays")
+        if not all(isinstance(value, list) for value in (expected_files_raw, required_tokens_raw, support_tokens_raw)):
+            raise ValueError(
+                f"Case {case_id} expected_files/required_tokens/support_tokens must be arrays"
+            )
         expected_files = tuple(str(value).strip() for value in expected_files_raw if str(value).strip())
         required_tokens = tuple(str(value).strip() for value in required_tokens_raw if str(value).strip())
+        support_tokens = tuple(str(value).strip() for value in support_tokens_raw if str(value).strip())
         if answerable and (not expected_files or not required_tokens):
             raise ValueError(f"Answerable case {case_id} requires expected_files and required_tokens")
         if not answerable and (expected_files or required_tokens):
             raise ValueError(f"No-evidence case {case_id} must not define expected evidence")
+        if not answerable and not support_tokens:
+            raise ValueError(f"No-evidence case {case_id} requires support_tokens for false-positive scoring")
         seen_ids.add(case_id)
         cases.append(
             BenchmarkCase(
@@ -59,6 +65,7 @@ def _load_private_pack(path: Path) -> tuple[str, list[BenchmarkCase]]:
                 expected_files=expected_files,
                 required_tokens=required_tokens,
                 answerable=answerable,
+                support_tokens=support_tokens,
             )
         )
     return name, cases
@@ -114,11 +121,9 @@ def main() -> int:
     with httpx.Client(base_url=args.api_base, headers=headers, timeout=120.0) as client:
         settings = client.patch("/settings", json={"embedding_provider": args.provider})
         settings.raise_for_status()
-
         workspace = client.post("/workspaces", json={"name": f"RAG Benchmark — {args.provider}"})
         workspace.raise_for_status()
         workspace_id = workspace.json()["id"]
-
         root = client.post(
             f"/workspaces/{workspace_id}/roots",
             json={"path": str(args.corpus_dir.resolve()), "scan_now": True, "watch_enabled": False},
@@ -127,23 +132,11 @@ def main() -> int:
         queued = int(root.json().get("scan", {}).get("queued") or 0)
         if queued <= 0:
             raise RuntimeError("Benchmark corpus scan queued no files")
-
-        parsed_total = _drain_pipeline(
-            client,
-            "/parser/process",
-            batch_limit=args.batch_limit,
-            max_batches=args.max_batches,
-        )
-        indexed_total = _drain_pipeline(
-            client,
-            "/knowledge/process",
-            batch_limit=args.batch_limit,
-            max_batches=args.max_batches,
-        )
+        parsed_total = _drain_pipeline(client, "/parser/process", batch_limit=args.batch_limit, max_batches=args.max_batches)
+        indexed_total = _drain_pipeline(client, "/knowledge/process", batch_limit=args.batch_limit, max_batches=args.max_batches)
         if parsed_total < queued or indexed_total < queued:
             raise RuntimeError(
-                f"Benchmark corpus did not fully parse/index: queued={queued}, "
-                f"parsed={parsed_total}, indexed={indexed_total}"
+                f"Benchmark corpus did not fully parse/index: queued={queued}, parsed={parsed_total}, indexed={indexed_total}"
             )
         if synthetic_documents is not None and queued != len(synthetic_documents):
             raise RuntimeError(
