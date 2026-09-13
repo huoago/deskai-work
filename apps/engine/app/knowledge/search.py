@@ -16,6 +16,11 @@ from app.knowledge.vector_store import LanceVectorStore
 MIN_VECTOR_SIMILARITY = 0.18
 RRF_K = 60.0
 TOKEN_RE = re.compile(r"[0-9A-Za-zÀ-ÖØ-öø-ÿ_./:+-]+|[\u3400-\u9fff]")
+ENGINEERING_ID_RE = re.compile(
+    r"(?i)(?<![0-9A-Za-z])(?=[0-9A-Za-z_.:/+-]{2,32}(?![0-9A-Za-z]))"
+    r"(?=[0-9A-Za-z_.:/+-]*[A-Za-z])(?=[0-9A-Za-z_.:/+-]*\d)"
+    r"[0-9A-Za-z_.:/+-]{2,32}"
+)
 
 
 @dataclass(slots=True)
@@ -124,6 +129,7 @@ class HybridSearch:
         hits: list[SearchHit] = []
         query_lower = query.lower()
         query_terms = _terms(query)
+        query_identifiers = _engineering_identifiers(query)
         for chunk, file in rows:
             l_rank = lexical_rank.get(chunk.id)
             v_rank = vector_rank.get(chunk.id)
@@ -154,6 +160,17 @@ class HybridSearch:
             rerank_score = _rerank(query_terms, chunk.content, file.filename, chunk.section_title)
             score += rerank_score * 0.012
 
+            # Municipal/engineering corpora are dense with identifiers such as
+            # RRP-04, DN1500, VC-03 and S01. An exact identifier match is much
+            # stronger evidence than overlap on generic words such as "status"
+            # or "pressure", so keep it as an explicit deterministic signal.
+            if query_identifiers:
+                candidate_identifiers = _engineering_identifiers(
+                    f"{file.filename} {chunk.section_title or ''} {chunk.content}"
+                )
+                identifier_coverage = len(query_identifiers & candidate_identifiers) / len(query_identifiers)
+                score += identifier_coverage * 0.03
+
             locator = _locator(chunk)
             hits.append(
                 SearchHit(
@@ -179,6 +196,15 @@ class HybridSearch:
 
 def _terms(text: str) -> set[str]:
     return {match.group(0).lower() for match in TOKEN_RE.finditer(text) if match.group(0).strip()}
+
+
+def _engineering_identifiers(text: str) -> set[str]:
+    identifiers: set[str] = set()
+    for match in ENGINEERING_ID_RE.finditer(text):
+        identifier = match.group(0).lower().rstrip("._/:+-")
+        if identifier:
+            identifiers.add(identifier)
+    return identifiers
 
 
 def _rerank(query_terms: set[str], content: str, filename: str, section: str | None) -> float:

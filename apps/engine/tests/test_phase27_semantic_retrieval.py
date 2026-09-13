@@ -14,7 +14,7 @@ from app.knowledge.embedding import (
     LocalHashEmbeddingProvider,
     OpenAIEmbeddingProvider,
 )
-from app.knowledge.search import _rerank, _terms
+from app.knowledge.search import _engineering_identifiers, _rerank, _terms
 
 
 def test_local_hash_provider_remains_deterministic_compatibility_fallback():
@@ -144,3 +144,9 @@ def test_reranker_rewards_query_term_coverage_and_metadata():
 
     assert strong > weak
     assert 0.0 <= weak <= strong <= 1.0
+
+
+def test_engineering_identifier_extraction_handles_common_project_codes():
+    identifiers = _engineering_identifiers("Sector S01 connects RRP-04 to DN1500 at VC-03.")
+
+    assert {"s01", "rrp-04", "dn1500", "vc-03"} <= identifiers
