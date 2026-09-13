@@ -19,6 +19,7 @@ class BenchmarkCase:
     expected_files: tuple[str, ...]
     required_tokens: tuple[str, ...]
     answerable: bool = True
+    support_tokens: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,13 +44,7 @@ class BenchmarkReport:
 
 
 def build_engineering_benchmark_v1() -> tuple[list[BenchmarkDocument], list[BenchmarkCase]]:
-    """Return a public, synthetic 100-question engineering retrieval benchmark.
-
-    The fixture intentionally contains no production/customer data. It mirrors the
-    structure of municipal-engineering records: quantities, pressures, dates,
-    responsible roles, handover states, revision markers and asset identifiers.
-    """
-
+    """Return a public, synthetic 100-question engineering retrieval benchmark."""
     documents: list[BenchmarkDocument] = []
     cases: list[BenchmarkCase] = []
 
@@ -66,7 +61,6 @@ def build_engineering_benchmark_v1() -> tuple[list[BenchmarkDocument], list[Benc
         revision_current = f"REV-{index:02d}-CURRENT"
         revision_old = f"REV-{index:02d}-OLD"
         chamber = f"VC-{index:02d}"
-
         documents.append(
             BenchmarkDocument(
                 filename=filename,
@@ -82,33 +76,12 @@ def build_engineering_benchmark_v1() -> tuple[list[BenchmarkDocument], list[Benc
                 ),
             )
         )
-
         facts = (
-            (
-                "quantity",
-                f"What is the verified secondary pipeline quantity for Sector {sector}?",
-                (str(quantity), "m"),
-            ),
-            (
-                "pressure",
-                f"What hydrostatic test pressure is recorded for Sector {sector}?",
-                (f"{pressure:.2f}", "MPa"),
-            ),
-            (
-                "date",
-                f"What is the latest acceptance coordination date for Sector {sector}?",
-                (date,),
-            ),
-            (
-                "role",
-                f"Who holds the responsible role for Sector {sector}?",
-                (role,),
-            ),
-            (
-                "status",
-                f"What is the current handover status of Sector {sector}?",
-                (status,),
-            ),
+            ("quantity", f"What is the verified secondary pipeline quantity for Sector {sector}?", (str(quantity), "m")),
+            ("pressure", f"What hydrostatic test pressure is recorded for Sector {sector}?", (f"{pressure:.2f}", "MPa")),
+            ("date", f"What is the latest acceptance coordination date for Sector {sector}?", (date,)),
+            ("role", f"Who holds the responsible role for Sector {sector}?", (role,)),
+            ("status", f"What is the current handover status of Sector {sector}?", (status,)),
         )
         for category, question, required_tokens in facts:
             cases.append(
@@ -122,14 +95,16 @@ def build_engineering_benchmark_v1() -> tuple[list[BenchmarkDocument], list[Benc
             )
 
     for index in range(1, 11):
+        asset = f"ZX-{900 + index}"
         cases.append(
             BenchmarkCase(
                 id=f"negative-{index:02d}",
                 category="no_evidence",
-                question=f"What is the certified value for nonexistent asset ZX-{900 + index}?",
+                question=f"What is the certified value for nonexistent asset {asset}?",
                 expected_files=(),
                 required_tokens=(),
                 answerable=False,
+                support_tokens=(asset,),
             )
         )
 
@@ -145,28 +120,27 @@ def evaluate_retrieval(
     case_list = list(cases)
     answerable = [case for case in case_list if case.answerable]
     no_evidence = [case for case in case_list if not case.answerable]
-
-    hits_at_1 = 0
-    hits_at_5 = 0
-    hits_at_10 = 0
+    hits_at_1 = hits_at_5 = hits_at_10 = 0
     reciprocal_rank_total = 0.0
-    answer_hits = 0
-    evidence_hits = 0
-    citation_hits = 0
-    no_evidence_hits = 0
+    answer_hits = evidence_hits = citation_hits = no_evidence_hits = 0
     category_counts = Counter(case.category for case in case_list)
     category_answerable = Counter(case.category for case in answerable)
     category_hits_at_5: defaultdict[str, int] = defaultdict(int)
 
     for case in case_list:
         results = search(case.question, 10)
-
         if not case.answerable:
-            # Semantic retrieval may legitimately return weak nearest neighbours.
-            # A no-evidence query is correctly unsupported when no returned
-            # candidate has lexical documentary evidence. The complement is the
-            # deterministic hallucination/support-false-positive rate.
-            if all(hit.get("lexical_rank") is None for hit in results):
+            # Generic query words can legitimately produce FTS candidates. A
+            # documentary false positive exists only when returned evidence also
+            # contains the case-specific entity/fact probe token(s).
+            def supports_negative_claim(hit: dict) -> bool:
+                content = str(hit.get("content") or "").lower()
+                probes = case.support_tokens
+                if probes:
+                    return all(token.lower() in content for token in probes)
+                return hit.get("lexical_rank") is not None
+
+            if not any(supports_negative_claim(hit) for hit in results):
                 no_evidence_hits += 1
             continue
 
@@ -177,7 +151,6 @@ def evaluate_retrieval(
                 relevant_rank = rank
                 relevant_hit = hit
                 break
-
         if relevant_rank is None:
             continue
         if relevant_rank <= 1:
@@ -194,17 +167,13 @@ def evaluate_retrieval(
             tokens_present = all(token.lower() in evidence.lower() for token in case.required_tokens)
             if tokens_present:
                 evidence_hits += 1
-                # The public benchmark uses extractive ground truth: an answer is
-                # correct only when the authoritative retrieved evidence contains
-                # every required answer token.
                 answer_hits += 1
             citation = str(relevant_hit.get("citation_label") or "")
             if any(citation.startswith(filename) for filename in case.expected_files):
                 citation_hits += 1
 
     denominator = len(answerable) or 1
-    no_evidence_denominator = len(no_evidence) or 1
-    no_evidence_accuracy = no_evidence_hits / no_evidence_denominator
+    no_evidence_accuracy = no_evidence_hits / (len(no_evidence) or 1)
     category_recall = {
         category: round(category_hits_at_5[category] / count, 6)
         for category, count in sorted(category_answerable.items())
