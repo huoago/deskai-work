@@ -130,17 +130,18 @@ def evaluate_retrieval(
     for case in case_list:
         results = search(case.question, 10)
         if not case.answerable:
-            # Generic query words can legitimately produce FTS candidates. A
-            # documentary false positive exists only when returned evidence also
-            # contains the case-specific entity/fact probe token(s).
-            def supports_negative_claim(hit: dict) -> bool:
+            probes = tuple(token.lower() for token in case.support_tokens)
+            false_support = False
+            for hit in results:
                 content = str(hit.get("content") or "").lower()
-                probes = case.support_tokens
                 if probes:
-                    return all(token.lower() in content for token in probes)
-                return hit.get("lexical_rank") is not None
-
-            if not any(supports_negative_claim(hit) for hit in results):
+                    if all(token in content for token in probes):
+                        false_support = True
+                        break
+                elif hit.get("lexical_rank") is not None:
+                    false_support = True
+                    break
+            if not false_support:
                 no_evidence_hits += 1
             continue
 
