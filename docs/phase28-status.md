@@ -1,6 +1,6 @@
 # Phase 28 — Engineering RAG Acceptance Benchmark
 
-Status: feature implementation merged to `main`; final private Lima semantic acceptance is pending an executable provider run. Phase 28 must not be described as fully accepted until that run is recorded.
+Status: feature implementation merged to `main`; final private Lima semantic acceptance is pending executable BGE-M3 and OpenAI provider runs. Phase 28 must not be described as fully accepted until those runs are recorded.
 
 ## Feature merge
 
@@ -71,7 +71,7 @@ The runner also supports `--pack <private-ground-truth.json>` so real project co
 
 ## Private Lima acceptance pack prepared outside GitHub
 
-A private 100-question Lima acceptance pack has now been generated from two connected, real project source documents exported locally and **not committed to GitHub**:
+A private 100-question Lima acceptance pack has been generated from two connected, real project source documents exported locally and **not committed to GitHub**:
 
 1. `利马管网项目的技术、质量、测量、变更、绘图、试验经验总结｜V4完整重编版｜2026.txt` (~300 KB)
 2. `秘鲁管网施工标准作业体系_第三版中文扩编版_2026.txt` (~219 KB)
@@ -86,20 +86,73 @@ Pack structure:
 - every answerable Ground Truth token was reverse-checked against its declared source file;
 - Ground Truth source-consistency errors: **0**.
 
-The private pack currently exists only in the controlled local working environment as `lima_rag_acceptance_pack_v1.private.json`. It is intentionally excluded from this public repository.
+The private pack exists only in the controlled local working environment as `lima_rag_acceptance_pack_v1.private.json`. It is intentionally excluded from this public repository.
+
+## Real Lima local_hash execution
+
+The real Lima private corpus and 100-question pack were executed in the controlled local environment using a retrieval-core harness reproduced directly from the current production source for:
+
+- plain-text parsing/block boundaries (`app/parsing/readers.py`);
+- Phase 27 chunking (`MAX_CHARS=1600`, `OVERLAP_CHARS=180`);
+- SQLite FTS5 trigram query construction and BM25 ordering;
+- `local-hash-384-v1` feature hashing and normalized vectors;
+- Phase 27 Hybrid Search RRF/vector-similarity/deterministic reranking/engineering-ID boost;
+- Phase 28 `evaluate_retrieval` semantics and no-evidence support probes.
+
+This is a faithful retrieval-core execution, but it is **not represented as a packaged FastAPI Engine run** because the controlled container cannot clone/install the complete repository runtime from the network.
+
+Observed Lima `local_hash` metrics:
+
+| Metric | Result | Real-project threshold | Verdict |
+| --- | ---: | ---: | --- |
+| Recall@1 | 0.744444 | >= 0.90 | FAIL |
+| Recall@5 | 0.977778 | >= 0.98 | FAIL (marginal) |
+| Recall@10 | 1.000000 | >= 0.98 | PASS |
+| MRR | 0.841481 | >= 0.92 | FAIL |
+| Answer Accuracy | 0.744444 | >= 0.98 | FAIL |
+| Evidence Accuracy | 0.744444 | >= 0.98 | FAIL |
+| Citation Accuracy | 1.000000 | >= 0.98 | PASS |
+| No-Evidence Accuracy | 1.000000 | >= 0.90 | PASS |
+| Hallucination Rate | 0.000000 | <= 0.10 | PASS |
+
+Per-category Recall@5:
+
+- change: 1.000000
+- handover: 1.000000
+- hot_tap: 1.000000
+- measurement: 0.833333
+- project_data: 1.000000
+- quality: 1.000000
+- test: 1.000000
+- water_meter: 1.000000
+
+Failure analysis: citation/file selection remained correct, but 23 of the 90 answerable cases failed exact Ground Truth token evidence in the first matching-file chunk. The largest clusters were water-meter (5), quality (5), measurement (4), hot-tap (3), project-data (3), and handover (3). This supports the intended architecture decision: `local_hash` remains an offline compatibility fallback, not the semantic-quality target.
+
+## Semantic-provider execution blockers — do not fabricate results
+
+The same controlled environment was checked for the exact production semantic runtimes.
+
+### local_bge_m3
+
+Production requires the pinned Xenova BGE-M3 quantized ONNX model and tokenizer plus Python `onnxruntime` and `tokenizers`. The host contains an OS-level `libonnxruntime.so.1.21.0`, but the required Python packages, tokenizer asset, and pinned model asset are not present. Outbound DNS is blocked, so PyPI/Hugging Face installation/download attempts fail. A different embedding model is not an acceptable substitute for this acceptance comparison.
+
+Status: **BLOCKED BY EXECUTION ENVIRONMENT — no score recorded.**
+
+### openai
+
+Neither `OPENAI_API_KEY` nor `DESKAI_OPENAI_API_KEY` is exposed to the controlled runtime. Phase 27 intentionally keeps credentials in the authorized secret store and prevents inventing or leaking them.
+
+Status: **BLOCKED BY AUTHORIZED CREDENTIAL AVAILABILITY — no score recorded.**
 
 ## Remaining acceptance gate — do not waive
 
-Phase 28 is **not yet fully accepted** because the real Lima pack has not yet been executed end-to-end through the packaged DeskAI Engine with all deliberately available semantic providers.
+Final acceptance still requires the same private Lima pack to be run with:
 
-The current controlled execution environment cannot clone/run the public repository directly (outbound GitHub DNS is unavailable in the container), no BGE-M3 model is present in the local model cache, and no OpenAI API credential is exposed to this runtime. These are execution-environment constraints, not reasons to substitute synthetic results for real-project results.
+1. `local_bge_m3` using the exact pinned production model/tokenizer;
+2. `openai` using an explicitly authorized configured credential;
+3. the same Recall@K, MRR, Answer Accuracy, Citation Accuracy, No-Evidence Accuracy and Hallucination Rate metrics side-by-side;
+4. a clear final pass/fail verdict against the real-project thresholds.
 
-Final acceptance requires recording, for the private Lima 100-question pack:
+The `local_hash` result is now recorded and demonstrates that the compatibility fallback is **not sufficient** for the real Lima semantic target.
 
-1. `local_hash` baseline report;
-2. `local_bge_m3` semantic report after the model is deliberately installed;
-3. `openai` semantic report only when an authorized credential is deliberately configured;
-4. Recall@K, MRR, Answer Accuracy, Citation Accuracy, No-Evidence Accuracy and Hallucination Rate side-by-side;
-5. a clear pass/fail verdict against the agreed real-project thresholds.
-
-Until those results exist, the correct status is: **Phase 28 feature complete and merged; real Lima semantic acceptance pending.**
+Until the two semantic-provider reports exist, the correct status is: **Phase 28 feature complete and merged; real Lima local_hash baseline executed and failed semantic acceptance; BGE-M3/OpenAI comparison pending due external runtime/credential prerequisites. The closeout branch must remain unmerged.**
