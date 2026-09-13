@@ -29,19 +29,17 @@ def _prepare_benchmark(client, tmp_path: Path) -> str:
 
 def test_phase28_benchmark_is_exactly_100_questions_and_has_required_coverage():
     documents, cases = build_engineering_benchmark_v1()
-
     assert len(documents) == 18
     assert len(cases) == 100
     assert sum(case.answerable for case in cases) == 90
     assert sum(not case.answerable for case in cases) == 10
+    assert all(case.support_tokens for case in cases if not case.answerable)
     categories = {case.category for case in cases}
     assert categories == {"quantity", "pressure", "date", "role", "status", "no_evidence"}
 
 
 def test_phase28_scoring_math_is_deterministic():
     _, cases = build_engineering_benchmark_v1()
-    # Pick cases from different authoritative files so a fixed first-file hit
-    # is relevant to exactly one of the two questions.
     sample = [cases[0], cases[5]]
 
     def fake_search(question: str, limit: int) -> list[dict]:
@@ -65,10 +63,9 @@ def test_phase28_scoring_math_is_deterministic():
     assert report.evidence_accuracy == 0.5
 
 
-def test_phase28_hallucination_metric_is_complement_of_no_evidence_accuracy():
+def test_phase28_hallucination_metric_is_entity_probe_based():
     _, cases = build_engineering_benchmark_v1()
     negative = [case for case in cases if not case.answerable][:2]
-
     calls = 0
 
     def fake_search(question: str, limit: int) -> list[dict]:
@@ -76,11 +73,12 @@ def test_phase28_hallucination_metric_is_complement_of_no_evidence_accuracy():
         del question, limit
         calls += 1
         if calls == 1:
-            return []
+            # Generic lexical overlap alone is not evidence for the nonexistent asset.
+            return [{"filename": "generic.md", "content": "certified value", "lexical_rank": 1}]
         return [
             {
                 "filename": "wrong-support.md",
-                "content": "unrelated but lexical support",
+                "content": f"fabricated documentary support for {negative[1].support_tokens[0]}",
                 "citation_label": "wrong-support.md",
                 "lexical_rank": 1,
             }
@@ -105,9 +103,6 @@ def test_phase28_local_hash_end_to_end_retrieval_gate(client, tmp_path: Path):
 
     report = evaluate_retrieval(cases, search)
     diagnostics = report.as_dict()
-
-    # The deterministic compatibility provider is the CI regression floor, not
-    # the target semantic quality. BGE-M3/OpenAI runs use the same benchmark.
     assert report.total_cases == 100, diagnostics
     assert report.recall_at_1 >= 0.90, diagnostics
     assert report.recall_at_5 >= 0.98, diagnostics
